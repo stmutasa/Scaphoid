@@ -1,0 +1,1 @@
+Saving segregated tfrecords... 200 in data/BOX_LOCS_0Saving segregated tfrecords... 180 in data/BOX_LOCS_1Saving segregated tfrecords... 200 in data/BOX_LOCS_2Saving segregated tfrecords... 188 in data/BOX_LOCS_3Made 768 bounding boxes. H/W AVG: 658.857421875/449.8203125 Max: 1898.0/2223.5
