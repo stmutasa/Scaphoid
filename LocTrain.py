@@ -165,7 +165,7 @@ def train():
                           % (Epoch, _l2loss, FLAGS.batch_size / elapsed, _loss, _MSELoss))
 
                     # Retreive and print the labels and logits
-                    print('Labels: %s' % np.squeeze(_labels.astype(np.int8))[:20])
+                    print('Labels: \n%s' % np.squeeze(_labels.astype(np.float32))[:20])
                     print('Logits: %s' % np.squeeze(np.argmax(_logits.astype(np.float), axis=1))[:20])
                     print('Accnos: %s' % np.squeeze(_ID)[:6])
 

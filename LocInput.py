@@ -208,6 +208,7 @@ class DataPreprocessor(object):
     if self._distords:  # Training
 
         # Data Augmentation ------------------ Flip, Contrast, brightness, noise
+        # TODO: Random jiggle points
         # box_data = [0ymin, 1xmin, 2ymax, 3xmax, 4cny, 5cnx, 6height, 7width, 8origshapey, 9origshapex]
 
         # Resize to network size
