@@ -10,6 +10,7 @@ import SODLoader as SDL
 import SOD_Display as SDD
 import glob
 from pathlib import Path
+import numpy as np
 
 sdl= SDL.SODLoader('/home/stmutasa/Code/Datasets/Scaphoid/')
 sdd = SDD.SOD_Display()
@@ -130,36 +131,38 @@ def test():
                 finally:
 
                     # Calculate final MAE and ACC
-                    sdt.AUC = sdt.calculate_mean_absolute_error(_logs, _lbls, display=False)
-                    print ('*** MAE = %s,  Labels/Logits: ***' %sdt.AUC)
-                    for z in range(10):
-                        print ('%.3f/%.3f, %.3f/%.3f, %.3f/%.3f, %.3f/%.3f'
-                               %(_lbls[z,0], _logs[z, 0], _lbls[z,1], _logs[z, 1], _lbls[z,2], _logs[z, 2], _lbls[z,3], _logs[z, 3]))
-                    print('------ Current Best AUC: %.4f (Epoch: %s) --------' % (best_MAE, best_epoch))
+                    sdt.MAE = sdt.calculate_mean_absolute_error(_logs, _lbls, display=False)
+                    print ('*** MAE = %.4f%%,  Labels/Logits: ***' % (sdt.MAE*100))
+                    for z in range(5):
+                        this_MAE = np.mean(np.absolute(_logs[z] - _lbls[z]))
+                        print ('%.3f/%.3f, %.3f/%.3f, %.3f/%.3f, %.3f/%.3f for an MAE of %.2f%%'
+                               %(_lbls[z,0], _logs[z, 0], _lbls[z,1], _logs[z, 1], _lbls[z,2],
+                                 _logs[z, 2], _lbls[z,3], _logs[z, 3], this_MAE*100))
+                    print('------ Current Best MAE: %.4f (Epoch: %s) --------' % (best_MAE, best_epoch))
 
                     # Lets save runs that perform well
-                    if sdt.AUC <= best_MAE:
+                    if sdt.MAE <= best_MAE:
 
                         # Save the checkpoint
                         print(" ---------------- SAVING THIS ONE %s", ckpt.model_checkpoint_path)
 
                         # Define the filenames
-                        checkpoint_file = os.path.join('testing/' + FLAGS.RunInfo, ('Epoch_%s_MAE_%0.3f' % (Epoch, sdt.AUC)))
-                        #csv_file = os.path.join('testing/' + FLAGS.RunInfo, ('%s_E_%s_AUC_%0.2f.csv' % (FLAGS.RunInfo[:-1], Epoch, sdt.AUC)))
+                        checkpoint_file = os.path.join('testing/' + FLAGS.RunInfo, ('Epoch_%s_MAE_%0.3f' % (Epoch, sdt.MAE)))
+                        #csv_file = os.path.join('testing/' + FLAGS.RunInfo, ('%s_E_%s_AUC_%0.2f.csv' % (FLAGS.RunInfo[:-1], Epoch, sdt.MAE)))
 
                         # Save the checkpoint
                         saver.save(mon_sess, checkpoint_file)
                         #sdl.save_Dict_CSV(data, csv_file)
 
                         # Save a new best MAE
-                        best_MAE = sdt.AUC
+                        best_MAE = sdt.MAE
                         best_epoch = Epoch
 
                     # Shut down the session
                     mon_sess.close()
 
             # Break if this is the final checkpoint
-            if '499' in Epoch: break
+            if '1000' in Epoch: break
 
             # Print divider
             print('-' * 70)
@@ -180,7 +183,7 @@ def test():
 
 
 def main(argv=None):  # pylint: disable=unused-argument
-    time.sleep(0)
+    time.sleep(30)
     if tf.gfile.Exists('testing/'):
         tf.gfile.DeleteRecursively('testing/')
     tf.gfile.MakeDirs('testing/')

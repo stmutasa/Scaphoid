@@ -23,7 +23,7 @@ tf.app.flags.DEFINE_integer('network_dims', 512, """dimensions of the network in
 tf.app.flags.DEFINE_integer('repeats', 10, """epochs to repeat before reloading""")
 
 # Define some of the immutable variables
-tf.app.flags.DEFINE_integer('num_epochs', 300, """Number of epochs to run""")
+tf.app.flags.DEFINE_integer('num_epochs', 1000, """Number of epochs to run""")
 tf.app.flags.DEFINE_integer('epoch_size', 468, """How many examples""")
 tf.app.flags.DEFINE_integer('print_interval', 5, """How often to print a summary to console during training""")
 tf.app.flags.DEFINE_integer('checkpoint_interval', 25, """How many Epochs to wait before saving a checkpoint""")
@@ -192,6 +192,9 @@ def train():
 
                         # Save the checkpoint
                         saver.save(mon_sess, checkpoint_file)
+
+                        # Sleep a little to let testing catch up
+                        time.sleep(5)
 
                 except tf.errors.OutOfRangeError:
                     print('*' * 10, time.time(), '\nOut of Range error: re-initializing iterator')
