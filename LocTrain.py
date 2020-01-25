@@ -60,7 +60,8 @@ def train():
         data['data'] = tf.reshape(data['data'], [FLAGS.batch_size, FLAGS.network_dims, FLAGS.network_dims])
 
         # Perform the forward pass:
-        logits, l2loss = network.forward_pass((data['data'], data['img_small']), phase_train=phase_train)
+        logits = network.forward_pass((data['data'], data['img_small']), phase_train=phase_train)
+        l2loss = network.sdn.calc_L2_Loss(FLAGS.l2_gamma)
 
         # Labels
         labels = data['box_data']
@@ -120,6 +121,9 @@ def train():
             # Initialize the step counter
             timer, batch_count = 0, 0
 
+            # Finalize graph
+            mon_sess.graph.finalize()
+
             # No queues!
             for i in range(max_steps):
 
@@ -129,7 +133,7 @@ def train():
                     mon_sess.run(train_op, feed_dict={phase_train: True})
                     batch_count += FLAGS.batch_size
                 except tf.errors.OutOfRangeError:
-                    print('*' * 10, time.time(), '\n%s examples run, re-initializing iterator' % batch_count)
+                    print('*' * 10, '\n%s examples run, re-initializing iterator\n' % batch_count)
                     batch_count = 0
                     mon_sess.run(iterator.initializer)
                 timer += (time.time() - start)
@@ -137,56 +141,62 @@ def train():
                 # Calculate current epoch
                 Epoch = int((i * FLAGS.batch_size) / FLAGS.epoch_size)
 
-                # Console and Tensorboard print interval
-                if i % print_interval == 0:
+                try:
 
-                    # Load some metrics
-                    _labels, _logits, _MSELoss, _l2loss, _loss, _ID = mon_sess.run([
-                        labels, logits, MSE_Loss, l2loss, loss, data['view']], feed_dict={phase_train: True})
+                    # Console and Tensorboard print interval
+                    if i % print_interval == 0:
 
-                    # Make losses display in ppt
-                    _loss *= 1e3
-                    _MSELoss *= 1e3
-                    _l2loss *= 1e3
+                        # Load some metrics
+                        _labels, _logits, _MSELoss, _l2loss, _loss, _ = mon_sess.run([
+                            labels, logits, MSE_Loss, l2loss, loss, data['accno']], feed_dict={phase_train: True})
 
-                    # Get timing stats
-                    elapsed = timer / print_interval
-                    timer = 0
+                        # Make losses display in ppt
+                        _loss *= 1e3
+                        _MSELoss *= 1e3
+                        _l2loss *= 1e3
 
-                    # use numpy to print only the first sig fig
-                    np.set_printoptions(precision=2)
+                        # Get timing stats
+                        elapsed = timer / print_interval
+                        timer = 0
 
-                    # Calc epoch
-                    Epoch = int((i * FLAGS.batch_size) / FLAGS.epoch_size)
+                        # use numpy to print only the first sig fig
+                        np.set_printoptions(precision=3, suppress=True, linewidth=150)
 
-                    # Print the data
-                    print('-' * 70)
-                    print('Epoch %d, L2 Loss: = %.3f (%.1f eg/s), Total Loss: %.3f SCE: %.4f'
-                          % (Epoch, _l2loss, FLAGS.batch_size / elapsed, _loss, _MSELoss))
+                        # Calc epoch
+                        Epoch = int((i * FLAGS.batch_size) / FLAGS.epoch_size)
 
-                    # Retreive and print the labels and logits
-                    print('Labels: \n%s' % np.squeeze(_labels.astype(np.float32))[:20])
-                    print('Logits: %s' % np.squeeze(np.argmax(_logits.astype(np.float), axis=1))[:20])
-                    print('Accnos: %s' % np.squeeze(_ID)[:6])
+                        # Print the data
+                        print('-' * 70)
+                        print('\nEpoch %d, L2 Loss: = %.3f (%.1f eg/s), Total Loss: %.3f MSE: %.4f'
+                              % (Epoch, _l2loss, FLAGS.batch_size / elapsed, _loss, _MSELoss))
 
-                    # Run a session to retrieve our summaries
-                    summary = mon_sess.run(all_summaries, feed_dict={phase_train: True})
+                        # Retreive and print the labels and logits
+                        print('Labels: \n%s' % np.squeeze(_labels.astype(np.float32))[:2])
+                        print('Logits: \n%s' % np.squeeze(_logits.astype(np.float32))[:2])
 
-                    # Add the summaries to the protobuf for Tensorboard
-                    summary_writer.add_summary(summary, i)
+                        # Run a session to retrieve our summaries
+                        summary = mon_sess.run(all_summaries, feed_dict={phase_train: True})
 
-                if i % checkpoint_interval == 0:
+                        # Add the summaries to the protobuf for Tensorboard
+                        summary_writer.add_summary(summary, i)
 
-                    print('-' * 70, '\nSaving... GPU: %s, File:%s' % (FLAGS.GPU, FLAGS.RunInfo[:-1]))
+                    if i % checkpoint_interval == 0:
 
-                    # Define the filename
-                    file = ('Epoch_%s' % Epoch)
+                        print('-' * 70, '\nSaving... GPU: %s, File:%s' % (FLAGS.GPU, FLAGS.RunInfo[:-1]))
 
-                    # Define the checkpoint file:
-                    checkpoint_file = os.path.join(FLAGS.train_dir + FLAGS.RunInfo, file)
+                        # Define the filename
+                        file = ('Epoch_%s' % Epoch)
 
-                    # Save the checkpoint
-                    saver.save(mon_sess, checkpoint_file)
+                        # Define the checkpoint file:
+                        checkpoint_file = os.path.join(FLAGS.train_dir + FLAGS.RunInfo, file)
+
+                        # Save the checkpoint
+                        saver.save(mon_sess, checkpoint_file)
+
+                except tf.errors.OutOfRangeError:
+                    print('*' * 10, time.time(), '\nOut of Range error: re-initializing iterator')
+                    batch_count = 0
+                    mon_sess.run(iterator.initializer)
 
 
 def main(argv=None):  # pylint: disable=unused-argument

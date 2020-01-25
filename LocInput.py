@@ -208,12 +208,14 @@ class DataPreprocessor(object):
     if self._distords:  # Training
 
         # Data Augmentation ------------------ Flip, Contrast, brightness, noise
-        # TODO: Random jiggle points
         # box_data = [0ymin, 1xmin, 2ymax, 3xmax, 4cny, 5cnx, 6height, 7width, 8origshapey, 9origshapex]
 
         # Resize to network size
         image = tf.expand_dims(image, -1)
         image = tf.image.resize_images(image, [FLAGS.network_dims, FLAGS.network_dims], tf.compat.v1.image.ResizeMethod.BICUBIC)
+
+        # Keep track of distortions done
+        record['distortion'] = ''
 
         # Randomly flip
         def flip(mode=None):
@@ -221,12 +223,14 @@ class DataPreprocessor(object):
             # When flipping, consider that the top left and bottom right corners represent different points now
             ld = record['box_data']
 
+            # For now don't do vertical flip. It doesn't make a ton of sense
             if mode == 1:
-                img = tf.image.flip_up_down(image) # Vertical flip:
-                ld0 = (1 - ld[0]) - ld[6] # y=(1-y) - Height to keep top left corner at top left
-                ld2 = (1 - ld[2]) + ld[6] # y=(1-y) + Height to keep bottom right at bottom right
-                ld4 = 1 - ld[4] # Flip center point Y-axis
-                stacked = tf.stack([ld0, ld[1], ld2, ld[3], ld4, ld[5], ld[6], ld[7], ld[8], ld[9]])
+                # img = tf.image.flip_up_down(image) # Vertical flip:
+                # ld0 = (1 - ld[0]) - ld[6] # y=(1-y) - Height to keep top left corner at top left
+                # ld2 = (1 - ld[2]) + ld[6] # y=(1-y) + Height to keep bottom right at bottom right
+                # ld4 = 1 - ld[4] # Flip center point Y-axis
+                # stacked = tf.stack([ld0, ld[1], ld2, ld[3], ld4, ld[5], ld[6], ld[7], ld[8], ld[9]])
+                stacked, img = ld, image
 
             elif mode == 2:
                 img = tf.image.flip_left_right(image) # Horizontal flip
@@ -234,9 +238,8 @@ class DataPreprocessor(object):
                 ld3 = (1 - ld[3]) + ld[7] # x=(1-x) + width to keep bottom right at bottom right
                 ld5 = 1 - ld[5] # Flip center point X axis
                 stacked = tf.stack([ld[0], ld1, ld[2], ld3, ld[4], ld5, ld[6], ld[7], ld[8], ld[9]])
-            else:
-                img = image
-                stacked = ld
+
+            else: stacked, img = ld, image
 
             return img, stacked
 
@@ -248,11 +251,16 @@ class DataPreprocessor(object):
         image = tf.image.random_brightness(image, max_delta=2)
         image = tf.image.random_contrast(image, lower=0.995, upper=1.005)
 
+        # Randomly jiggle locations by up to 1.5% of image dims
+        rn, lr = [], record['box_data']
+        for z in range(6): rn.append(tf.random.uniform([], minval=-0.015, maxval=0.015, dtype=tf.float32))
+        record['box_data'] = tf.stack([lr[0]+rn[0], lr[1]+rn[1], lr[2]+rn[2], lr[3]+rn[3], lr[4]+rn[4], lr[5]+rn[5], lr[6], lr[7], lr[8], lr[9]])
+
         # For noise, first randomly determine how 'noisy' this study will be
-        T_noise = tf.random_uniform([], 0, 0.02)
+        T_noise = tf.random.uniform([], 0, 0.02)
 
         # Create a poisson noise array
-        noise = tf.random_uniform(shape=[FLAGS.network_dims, FLAGS.network_dims, 1], minval=-T_noise, maxval=T_noise)
+        noise = tf.random.uniform(shape=[FLAGS.network_dims, FLAGS.network_dims, 1], minval=-T_noise, maxval=T_noise)
 
         # Add the poisson noise
         image = tf.add(image, tf.cast(noise, tf.float32))

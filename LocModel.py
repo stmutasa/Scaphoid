@@ -62,7 +62,7 @@ def forward_pass(images, phase_train):
     # Add logits along batchxnum axis 1
     Logits = tf.concat([LogitsTL, LogitsBR], 1)
 
-    return Logits, sdn.calc_L2_Loss(FLAGS.l2_gamma)
+    return Logits
 
 
 def total_loss(logits, labels):
@@ -113,9 +113,6 @@ def backward_pass(total_loss):
     # Compute the gradients
     gradients = opt.compute_gradients(total_loss)
 
-    # clip the gradients
-    #gradients = [(tf.clip_by_value(grad, -1., 1.), var) for grad, var in gradients]
-
     # Apply the gradients
     train_op = opt.apply_gradients(gradients, global_step, name='train')
 
@@ -145,12 +142,8 @@ def inputs(training=True, skip=False):
     :return:
     """
 
-    # To Do: Skip part 1 and 2 if the protobuff already exists
-    if not skip:
-        #Input.pre_proc_25D(FLAGS.box_dims)
-        Input.create_test_set(FLAGS.box_dims)
+    if not skip:  Input.pre_proc_localizations(FLAGS.box_dims)
 
-    else:
-        print('-------------------------Previously saved records found! Loading...')
+    else: print('-------------------------Previously saved records found! Loading...')
 
     return Input.load_protobuf(training)
