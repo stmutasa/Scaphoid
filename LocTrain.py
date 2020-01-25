@@ -23,7 +23,7 @@ tf.app.flags.DEFINE_integer('network_dims', 512, """dimensions of the network in
 tf.app.flags.DEFINE_integer('repeats', 10, """epochs to repeat before reloading""")
 
 # Define some of the immutable variables
-tf.app.flags.DEFINE_integer('num_epochs', 1000, """Number of epochs to run""")
+tf.app.flags.DEFINE_integer('num_epochs', 3000, """Number of epochs to run""")
 tf.app.flags.DEFINE_integer('epoch_size', 468, """How many examples""")
 tf.app.flags.DEFINE_integer('print_interval', 5, """How often to print a summary to console during training""")
 tf.app.flags.DEFINE_integer('checkpoint_interval', 25, """How many Epochs to wait before saving a checkpoint""")
@@ -147,7 +147,7 @@ def train():
                     if i % print_interval == 0:
 
                         # Load some metrics
-                        _labels, _logits, _MSELoss, _l2loss, _loss, _ = mon_sess.run([
+                        _lbls, _logs, _MSELoss, _l2loss, _loss, _ = mon_sess.run([
                             labels, logits, MSE_Loss, l2loss, loss, data['accno']], feed_dict={phase_train: True})
 
                         # Make losses display in ppt
@@ -170,9 +170,12 @@ def train():
                         print('\nEpoch %d, L2 Loss: = %.3f (%.1f eg/s), Total Loss: %.3f MSE: %.4f'
                               % (Epoch, _l2loss, FLAGS.batch_size / elapsed, _loss, _MSELoss))
 
-                        # Retreive and print the labels and logits
-                        print('Labels: \n%s' % np.squeeze(_labels.astype(np.float32))[:2])
-                        print('Logits: \n%s' % np.squeeze(_logits.astype(np.float32))[:2])
+                        print('*** MSE = %.4f%%,  Labels/Logits: ***' % _MSELoss)
+                        for z in range(10):
+                            this_MAE = np.mean(np.absolute(_logs[z] - _lbls[z]))
+                            print('%.3f/%.3f, %.3f/%.3f, %.3f/%.3f, %.3f/%.3f for an MAE of %.2f%%'
+                                  % (_lbls[z, 0], _logs[z, 0], _lbls[z, 1], _logs[z, 1], _lbls[z, 2],
+                                     _logs[z, 2], _lbls[z, 3], _logs[z, 3], this_MAE * 100))
 
                         # Run a session to retrieve our summaries
                         summary = mon_sess.run(all_summaries, feed_dict={phase_train: True})
@@ -202,8 +205,7 @@ def train():
                     mon_sess.run(iterator.initializer)
 
 
-def main(argv=None):  # pylint: disable=unused-argument
-    time.sleep(0)
+def main(argv=None):
     if tf.gfile.Exists(FLAGS.train_dir + FLAGS.RunInfo):
         tf.gfile.DeleteRecursively(FLAGS.train_dir + FLAGS.RunInfo)
     tf.gfile.MakeDirs(FLAGS.train_dir + FLAGS.RunInfo)

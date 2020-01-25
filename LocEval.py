@@ -132,13 +132,13 @@ def test():
 
                     # Calculate final MAE and ACC
                     sdt.MAE = sdt.calculate_mean_absolute_error(_logs, _lbls, display=False)
-                    print ('*** MAE = %.4f%%,  Labels/Logits: ***' % (sdt.MAE*100))
+                    print ('*** MAE = %.4f%%, Current Best MAE = %.4f (Epoch %s),  Labels/Logits: ***' %
+                           (sdt.MAE*100, best_MAE, best_epoch))
                     for z in range(5):
                         this_MAE = np.mean(np.absolute(_logs[z] - _lbls[z]))
                         print ('%.3f/%.3f, %.3f/%.3f, %.3f/%.3f, %.3f/%.3f for an MAE of %.2f%%'
                                %(_lbls[z,0], _logs[z, 0], _lbls[z,1], _logs[z, 1], _lbls[z,2],
                                  _logs[z, 2], _lbls[z,3], _logs[z, 3], this_MAE*100))
-                    print('------ Current Best MAE: %.4f (Epoch: %s) --------' % (best_MAE, best_epoch))
 
                     # Lets save runs that perform well
                     if sdt.MAE <= best_MAE:
