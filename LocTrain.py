@@ -41,8 +41,8 @@ tf.app.flags.DEFINE_float('beta2', 0.999, """ The beta 1 value for the adam opti
 
 # Directory control
 tf.app.flags.DEFINE_string('train_dir', 'training/', """Directory to write event logs and save checkpoint files""")
-tf.app.flags.DEFINE_string('RunInfo', 'Initial_Run/', """Unique file name for this training run""")
-tf.app.flags.DEFINE_integer('GPU', 0, """Which GPU to use""")
+tf.app.flags.DEFINE_string('RunInfo', 'Long_Anneal/', """Unique file name for this training run""")
+tf.app.flags.DEFINE_integer('GPU', 1, """Which GPU to use""")
 
 def train():
 
@@ -147,8 +147,8 @@ def train():
                     if i % print_interval == 0:
 
                         # Load some metrics
-                        _lbls, _logs, _MSELoss, _l2loss, _loss, _ = mon_sess.run([
-                            labels, logits, MSE_Loss, l2loss, loss, data['accno']], feed_dict={phase_train: True})
+                        _lbls, _logs, _MSELoss, _l2loss, _loss, _id = mon_sess.run([
+                            labels, logits, MSE_Loss, l2loss, loss, data['view']], feed_dict={phase_train: True})
 
                         # Make losses display in ppt
                         _loss *= 1e3
@@ -158,6 +158,9 @@ def train():
                         # Get timing stats
                         elapsed = timer / print_interval
                         timer = 0
+
+                        # Clip labels
+                        _lbls = _lbls[:, :4]
 
                         # use numpy to print only the first sig fig
                         np.set_printoptions(precision=3, suppress=True, linewidth=150)
@@ -170,11 +173,11 @@ def train():
                         print('\nEpoch %d, L2 Loss: = %.3f (%.1f eg/s), Total Loss: %.3f MSE: %.4f'
                               % (Epoch, _l2loss, FLAGS.batch_size / elapsed, _loss, _MSELoss))
 
-                        print('*** MSE = %.4f%%,  Labels/Logits: ***' % _MSELoss)
+                        print('*** MSE = %.4f,  Labels/Logits: ***' % _MSELoss)
                         for z in range(10):
                             this_MAE = np.mean(np.absolute(_logs[z] - _lbls[z]))
-                            print('%.3f/%.3f, %.3f/%.3f, %.3f/%.3f, %.3f/%.3f for an MAE of %.2f%%'
-                                  % (_lbls[z, 0], _logs[z, 0], _lbls[z, 1], _logs[z, 1], _lbls[z, 2],
+                            print('%s -- %.3f/%.3f, %.3f/%.3f, %.3f/%.3f, %.3f/%.3f for an MAE of %.2f%%'
+                                  % (_id[z], _lbls[z, 0], _logs[z, 0], _lbls[z, 1], _logs[z, 1], _lbls[z, 2],
                                      _logs[z, 2], _lbls[z, 3], _logs[z, 3], this_MAE * 100))
 
                         # Run a session to retrieve our summaries

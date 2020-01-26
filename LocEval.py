@@ -34,7 +34,7 @@ tf.app.flags.DEFINE_float('moving_avg_decay', 0.999, """ The decay rate for the 
 
 # Directory control
 tf.app.flags.DEFINE_string('train_dir', 'training/', """Directory to write event logs and save checkpoint files""")
-tf.app.flags.DEFINE_string('RunInfo', 'Initial_Run/', """Unique file name for this training run""")
+tf.app.flags.DEFINE_string('RunInfo', 'Long_Anneal/', """Unique file name for this training run""")
 tf.app.flags.DEFINE_integer('GPU', 0, """Which GPU to use""")
 
 # Define a custom training class
@@ -120,7 +120,7 @@ def test():
                     while step < max_steps:
 
                         # Load some metrics for testing
-                        _lbls, _logs, _accnos = mon_sess.run([labels, logits, data['accno']], feed_dict={phase_train: False})
+                        _lbls, _logs, _id = mon_sess.run([labels, logits, data['accno']], feed_dict={phase_train: False})
 
                         # Increment step
                         step += 1
@@ -132,13 +132,13 @@ def test():
 
                     # Calculate final MAE and ACC
                     sdt.MAE = sdt.calculate_mean_absolute_error(_logs, _lbls, display=False)
-                    print ('*** MAE = %.4f%%, Current Best MAE = %.4f (Epoch %s),  Labels/Logits: ***' %
-                           (sdt.MAE*100, best_MAE, best_epoch))
-                    for z in range(5):
+                    print ('*** MAE = %.4f%% (Epoch: %s), Current Best MAE = %.4f (Epoch %s),  Labels/Logits: ***' %
+                           (sdt.MAE*100, Epoch, best_MAE, best_epoch))
+                    for z in range(10):
                         this_MAE = np.mean(np.absolute(_logs[z] - _lbls[z]))
-                        print ('%.3f/%.3f, %.3f/%.3f, %.3f/%.3f, %.3f/%.3f for an MAE of %.2f%%'
-                               %(_lbls[z,0], _logs[z, 0], _lbls[z,1], _logs[z, 1], _lbls[z,2],
-                                 _logs[z, 2], _lbls[z,3], _logs[z, 3], this_MAE*100))
+                        print('%s -- %.3f/%.3f, %.3f/%.3f, %.3f/%.3f, %.3f/%.3f for an MAE of %.2f%%'
+                              % (_id[z], _lbls[z, 0], _logs[z, 0], _lbls[z, 1], _logs[z, 1], _lbls[z, 2],
+                                 _logs[z, 2], _lbls[z, 3], _logs[z, 3], this_MAE * 100))
 
                     # Lets save runs that perform well
                     if sdt.MAE <= best_MAE:
@@ -162,7 +162,7 @@ def test():
                     mon_sess.close()
 
             # Break if this is the final checkpoint
-            if '1000' in Epoch: break
+            if '3000' in Epoch: break
 
             # Print divider
             print('-' * 70)
@@ -183,7 +183,7 @@ def test():
 
 
 def main(argv=None):  # pylint: disable=unused-argument
-    time.sleep(30)
+    time.sleep(60)
     if tf.gfile.Exists('testing/'):
         tf.gfile.DeleteRecursively('testing/')
     tf.gfile.MakeDirs('testing/')

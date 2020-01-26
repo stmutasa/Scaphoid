@@ -103,7 +103,7 @@ def backward_pass(total_loss):
     tf.summary.scalar('Total_Loss', total_loss)
 
     # Decay the learning rate
-    dk_steps = int((FLAGS.epoch_size / FLAGS.batch_size) * 50)
+    dk_steps = int((FLAGS.epoch_size / FLAGS.batch_size) * (FLAGS.num_epochs/4))
     lr_decayed = tf.train.cosine_decay_restarts(FLAGS.learning_rate, global_step, dk_steps)
 
     # Compute the gradients. NAdam optimizer came in tensorflow 1.2
