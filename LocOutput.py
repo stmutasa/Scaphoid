@@ -35,7 +35,8 @@ tf.app.flags.DEFINE_float('moving_avg_decay', 0.999, """ The decay rate for the 
 
 # Directory control
 tf.app.flags.DEFINE_string('train_dir', 'training/', """Directory to write event logs and save checkpoint files""")
-tf.app.flags.DEFINE_string('RunInfo', 'Initial_Run/', """Unique file name for this training run""")
+tf.app.flags.DEFINE_string('net_type', 'CEN', """Network predicting CEN or BBOX""")
+tf.app.flags.DEFINE_string('RunInfo', 'Center/', """Unique file name for this training run""")
 tf.app.flags.DEFINE_integer('GPU', 0, """Which GPU to use""")
 
 # Define a custom training class
@@ -56,10 +57,12 @@ def test():
         data['data'] = tf.reshape(data['data'], [FLAGS.batch_size, FLAGS.network_dims, FLAGS.network_dims])
 
         # Perform the forward pass:
-        logits = network.forward_pass((data['data'], data['img_small']), phase_train=phase_train)
-
-        # Labels
-        labels = data['box_data'][:, :4]
+        if FLAGS.net_type == 'BBOX':
+            logits = network.forward_pass((data['data'], data['img_small']), phase_train=phase_train)
+            labels = data['box_data'][:, :4]
+        elif FLAGS.net_type == 'CEN':
+            logits = network.forward_pass_center((data['data'], data['img_small']), phase_train=phase_train)
+            labels = data['box_data'][:, 4:6]
 
         # Initialize variables operation
         var_init = tf.group(tf.global_variables_initializer(), tf.local_variables_initializer())
@@ -92,86 +95,128 @@ def test():
             mon_sess.run(iterator.initializer)
 
             if ckpt and ckpt.model_checkpoint_path:
-
-                # Restore the model
                 saver.restore(mon_sess, ckpt.model_checkpoint_path)
-
-                # Extract the epoch
-                Epoch = ckpt.model_checkpoint_path.split('/')[-1].split('Epoch')[-1]
 
             else:
                 print ('No checkpoint file found')
 
-            # Initialize the step counter
-            step = 0
+            # Run inference
+            _logs, _data = mon_sess.run([logits, data], feed_dict={phase_train: False})
 
-            # Set the max step count
-            max_steps = int(FLAGS.epoch_size / FLAGS.batch_size)
+            # Display the predictions
+            if FLAGS.net_type == 'BBOX': display = bbox_display(_data, _logs)
+            elif FLAGS.net_type == 'CEN': display = cen_display(_data, _logs)
 
-            # Tester instance
-            sdt = SDT.SODTester(True, False)
+            # Display
+            sdd.display_volume(display, True)
 
-            try:
+            # Shut down the session
+            mon_sess.close()
 
-                # Load some metrics for testing
-                _lbls, _logs, _data = mon_sess.run([labels, logits, data], feed_dict={phase_train: False})
 
-            except Exception as e:
-                print('Done with Training ', e)
 
-            finally:
+def bbox_display(_data, _logs):
 
-                # Trackers
-                show_all = []
+    """
+    Displays the bounding boxes made by a bbox predictor type network
+    :return:
+    """
 
-                # Output box_data = [0ymin, 1xmin, 2ymax, 3xmax, 4cny, 5cnx, 6height, 7width, 8origshapey, 9origshapex]
-                # for z in range (FLAGS.epoch_size):
-                for z in range(30, 100, 1):
+    # Trackers
+    show_all = []
 
-                    # Remake GTBox from saved data
-                    bd = _data['box_data'][z]
-                    width, height = (bd[3] - bd[1]) * bd[9], (bd[2] - bd[0]) * bd[8]
-                    xmin, ymin = bd[1] * bd[9], bd[0] * bd[8]
-                    gtbox_recon = {'name': 'rect', 'x': xmin, 'y': ymin, 'width': width, 'height': height}
+    # Output box_data = [0ymin, 1xmin, 2ymax, 3xmax, 4cny, 5cnx, 6height, 7width, 8origshapey, 9origshapex]
+    # for z in range (FLAGS.epoch_size):
+    for z in range(FLAGS.epoch_size):
 
-                    # Get parameters for center box
-                    cn = [gtbox_recon['y'] + (gtbox_recon['height'] // 2),
-                           gtbox_recon['x'] + (gtbox_recon['width'] // 2)]
-                    size = [gtbox_recon['height'], gtbox_recon['width']]
-                    _image = sdl.zoom_2D(_data['data'][z], [bd[8], bd[9]])
-                    box_true = sdl.generate_box(_image, cn, size, dim3d=False)[0]
+        # Remake GTBox from saved data
+        bd = _data['box_data'][z]
+        width, height = (bd[3] - bd[1]) * bd[9], (bd[2] - bd[0]) * bd[8]
+        xmin, ymin = bd[1] * bd[9], bd[0] * bd[8]
+        gtbox_recon = {'name': 'rect', 'x': xmin, 'y': ymin, 'width': width, 'height': height}
 
-                    # Display the predicted box
-                    bd[:4] = _logs[z]
-                    width, height = (bd[3] - bd[1]) * bd[9], (bd[2] - bd[0]) * bd[8]
-                    xmin, ymin = bd[1] * bd[9], bd[0] * bd[8]
-                    cn2 = [ymin + (height // 2), xmin + (width // 2)]
-                    size2 = [height, width]
-                    box_pred = sdl.generate_box(_image, cn2, size2, dim3d=False)[0]
+        # Get parameters for center box
+        cn = [gtbox_recon['y'] + (gtbox_recon['height'] // 2),
+              gtbox_recon['x'] + (gtbox_recon['width'] // 2)]
+        size = [gtbox_recon['height'], gtbox_recon['width']]
+        _image = sdl.zoom_2D(_data['data'][z], [bd[8], bd[9]])
+        box_true = sdl.generate_box(_image, cn, size, dim3d=False)[0]
 
-                    # Make new image
-                    display = np.zeros([512, 768], np.float32)
-                    display[0:512, 0:512] = _data['data'][z]
-                    display[0:256, 512:] = sdl.zoom_2D(box_true, [256, 256])
-                    display[256:, 512:] = sdl.zoom_2D(box_pred, [256, 256])
-                    display = sdl.adaptive_normalization(display).astype(np.float32)
+        # Display the predicted box
+        bd[:4] = _logs[z]
+        width, height = (bd[3] - bd[1]) * bd[9], (bd[2] - bd[0]) * bd[8]
+        xmin, ymin = bd[1] * bd[9], bd[0] * bd[8]
+        cn2 = [ymin + (height // 2), xmin + (width // 2)]
+        size2 = [height, width]
+        box_pred = sdl.generate_box(_image, cn2, size2, dim3d=False)[0]
 
-                    # Display
-                    # title = _data['view'][z].decode('utf-8')
-                    # sdd.display_single_image(display, True, title=title)
-                    show_all.append(display)
+        # Make new image
+        display = np.zeros([512, 768], np.float32)
+        display[0:512, 0:512] = _data['data'][z]
+        display[0:256, 512:] = sdl.zoom_2D(box_true, [256, 256])
+        display[256:, 512:] = sdl.zoom_2D(box_pred, [256, 256])
+        try: display = sdl.adaptive_normalization(display).astype(np.float32)
+        except: pass
 
-                # Display
-                sdd.display_volume(show_all, True)
+        # Display
+        show_all.append(display)
 
-                # Shut down the session
-                mon_sess.close()
+    return np.asarray(show_all)
 
+
+def cen_display(_data, _logs):
+
+    """
+    Displays the bounding boxes made by a center spot predictor type network
+    :return:
+    """
+
+    # Trackers
+    show_all = []
+
+    # Output box_data = [0ymin, 1xmin, 2ymax, 3xmax, 4cny, 5cnx, 6height, 7width, 8origshapey, 9origshapex]
+    # for z in range (FLAGS.epoch_size):
+    for z in range(FLAGS.epoch_size):
+
+        # Remake GTBox from saved data
+        bd = _data['box_data'][z]
+        width, height = (bd[3] - bd[1]) * bd[9], (bd[2] - bd[0]) * bd[8]
+        xmin, ymin = bd[1] * bd[9], bd[0] * bd[8]
+        cn = [ymin + (height // 2), xmin + (width // 2)]
+        size = [height, width]
+        _image = sdl.zoom_2D(_data['data'][z], [bd[8], bd[9]])
+        box_true = sdl.generate_box(_image, cn, size, dim3d=False)[0]
+
+        # Display the predicted box
+        bd[4:6] = _logs[z]
+        height, width = 200, 200
+        xmin, ymin = (bd[5] * bd[9]) - width/2, (bd[4] * bd[8]) - height/2
+        gtbox_recon = {'name': 'rect', 'x': xmin, 'y': ymin, 'width': width, 'height': height}
+
+        # Get parameters for center box
+        cn2 = [gtbox_recon['y'] + (gtbox_recon['height'] // 2),
+              gtbox_recon['x'] + (gtbox_recon['width'] // 2)]
+        size2 = [gtbox_recon['height'], gtbox_recon['width']]
+        box_pred = sdl.generate_box(_image, cn2, size2, dim3d=False)[0]
+
+        # Make new image
+        display = np.zeros([512, 768], np.float32)
+        display[0:512, 0:512] = _data['data'][z]
+        display[0:256, 512:] = sdl.zoom_2D(box_true, [256, 256])
+        display[256:, 512:] = sdl.zoom_2D(box_pred, [256, 256])
+        try:
+            display = sdl.adaptive_normalization(display).astype(np.float32)
+        except:
+            pass
+
+        # Display
+        show_all.append(display)
+
+    return np.asarray(show_all)
 
 
 def main(argv=None):
     test()
-
 
 if __name__ == '__main__':
     tf.app.run()

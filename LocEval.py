@@ -27,7 +27,6 @@ tf.app.flags.DEFINE_integer('box_dims', 1024, """dimensions to save files""")
 tf.app.flags.DEFINE_integer('network_dims', 512, """dimensions of the network input""")
 tf.app.flags.DEFINE_integer('epoch_size', 200, """How many examples""")
 tf.app.flags.DEFINE_integer('batch_size', 200, """Number of images to process in a batch.""")
-tf.app.flags.DEFINE_string('net_type', 'CEN', """Network predicting CEN or BBOX""")
 
 # Hyperparameters:
 tf.app.flags.DEFINE_float('dropout_factor', 0.5, """ Keep probability""")
@@ -35,6 +34,7 @@ tf.app.flags.DEFINE_float('moving_avg_decay', 0.999, """ The decay rate for the 
 
 # Directory control
 tf.app.flags.DEFINE_string('train_dir', 'training/', """Directory to write event logs and save checkpoint files""")
+tf.app.flags.DEFINE_string('net_type', 'CEN', """Network predicting CEN or BBOX""")
 tf.app.flags.DEFINE_string('RunInfo', 'Center/', """Unique file name for this training run""")
 tf.app.flags.DEFINE_integer('GPU', 0, """Which GPU to use""")
 
@@ -58,11 +58,10 @@ def test():
         # Perform the forward pass:
         if FLAGS.net_type == 'BBOX':
             logits = network.forward_pass((data['data'], data['img_small']), phase_train=phase_train)
+            labels = data['box_data'][:, :4]
         elif FLAGS.net_type == 'CEN':
             logits = network.forward_pass_center((data['data'], data['img_small']), phase_train=phase_train)
-
-        # Labels
-        labels = data['box_data'][:, 4:6]
+            labels = data['box_data'][:, 4:6]
 
         # Initialize variables operation
         var_init = tf.group(tf.global_variables_initializer(), tf.local_variables_initializer())
