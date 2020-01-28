@@ -209,7 +209,6 @@ class DataPreprocessor(object):
     if self._distords:  # Training
 
         # Data Augmentation ------------------ Flip, Contrast, brightness, noise
-        # box_data = [0ymin, 1xmin, 2ymax, 3xmax, 4cny, 5cnx, 6height, 7width, 8origshapey, 9origshapex]
 
         # Resize to network size
         image = tf.expand_dims(image, -1)
@@ -225,15 +224,26 @@ class DataPreprocessor(object):
             ld = record['box_data']
 
             # For now don't do vertical flip. It doesn't make a ton of sense
+            # box_data = [0ymin, 1xmin, 2ymax, 3xmax, 4cny, 5cnx, 6height, 7width, 8origshapey, 9origshapex]
             if mode == 1:
-                # img = tf.image.flip_up_down(image) # Vertical flip:
-                # ld0 = (1 - ld[0]) - ld[6] # y=(1-y) - Height to keep top left corner at top left
-                # ld2 = (1 - ld[2]) + ld[6] # y=(1-y) + Height to keep bottom right at bottom right
-                # ld4 = 1 - ld[4] # Flip center point Y-axis
-                # stacked = tf.stack([ld0, ld[1], ld2, ld[3], ld4, ld[5], ld[6], ld[7], ld[8], ld[9]])
-                stacked, img = ld, image
+
+                if FLAGS.net_type == 'BBOX':
+                    # img = tf.image.flip_up_down(image) # Vertical flip:
+                    # ld0 = (1 - ld[0]) - ld[6] # y=(1-y) - Height to keep top left corner at top left
+                    # ld2 = (1 - ld[2]) + ld[6] # y=(1-y) + Height to keep bottom right at bottom right
+                    # ld4 = 1 - ld[4] # Flip center point Y-axis
+                    # stacked = tf.stack([ld0, ld[1], ld2, ld[3], ld4, ld[5], ld[6], ld[7], ld[8], ld[9]])
+                    stacked, img = ld, image
+
+                elif FLAGS.net_type == 'CEN':
+                    img = tf.image.flip_up_down(image) # Vertical flip:
+                    ld0 = (1 - ld[0]) - ld[6] # y=(1-y) - Height to keep top left corner at top left
+                    ld2 = (1 - ld[2]) + ld[6] # y=(1-y) + Height to keep bottom right at bottom right
+                    ld4 = 1 - ld[4] # Flip center point Y-axis
+                    stacked = tf.stack([ld0, ld[1], ld2, ld[3], ld4, ld[5], ld[6], ld[7], ld[8], ld[9]])
 
             elif mode == 2:
+
                 img = tf.image.flip_left_right(image) # Horizontal flip
                 ld1 = (1 - ld[1]) - ld[7] # x=(1-x) - Width to keep top left corner at top left
                 ld3 = (1 - ld[3]) + ld[7] # x=(1-x) + width to keep bottom right at bottom right
