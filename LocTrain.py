@@ -21,6 +21,7 @@ tf.app.flags.DEFINE_string('training_dir', 'training/', """Path to the training 
 tf.app.flags.DEFINE_integer('box_dims', 1024, """dimensions to save files""")
 tf.app.flags.DEFINE_integer('network_dims', 512, """dimensions of the network input""")
 tf.app.flags.DEFINE_integer('repeats', 10, """epochs to repeat before reloading""")
+tf.app.flags.DEFINE_string('net_type', 'CEN', """Network predicting CEN or BBOX""")
 
 # Define some of the immutable variables
 tf.app.flags.DEFINE_integer('num_epochs', 3000, """Number of epochs to run""")
@@ -41,7 +42,7 @@ tf.app.flags.DEFINE_float('beta2', 0.999, """ The beta 1 value for the adam opti
 
 # Directory control
 tf.app.flags.DEFINE_string('train_dir', 'training/', """Directory to write event logs and save checkpoint files""")
-tf.app.flags.DEFINE_string('RunInfo', 'Long_Anneal/', """Unique file name for this training run""")
+tf.app.flags.DEFINE_string('RunInfo', 'Center/', """Unique file name for this training run""")
 tf.app.flags.DEFINE_integer('GPU', 1, """Which GPU to use""")
 
 def train():
@@ -60,14 +61,15 @@ def train():
         data['data'] = tf.reshape(data['data'], [FLAGS.batch_size, FLAGS.network_dims, FLAGS.network_dims])
 
         # Perform the forward pass:
-        logits = network.forward_pass((data['data'], data['img_small']), phase_train=phase_train)
+        if FLAGS.net_type == 'BBOX': logits = network.forward_pass((data['data'], data['img_small']), phase_train=phase_train)
+        elif FLAGS.net_type =='CEN': logits = network.forward_pass_center((data['data'], data['img_small']), phase_train=phase_train)
         l2loss = network.sdn.calc_L2_Loss(FLAGS.l2_gamma)
 
         # Labels
         labels = data['box_data']
 
         # Calculate loss
-        MSE_Loss = network.total_loss(logits, labels)
+        MSE_Loss = network.total_loss(logits, labels, type=FLAGS.net_type)
 
         # Add the L2 regularization loss
         loss = tf.add(MSE_Loss, l2loss, name='TotalLoss')
@@ -160,7 +162,8 @@ def train():
                         timer = 0
 
                         # Clip labels
-                        _lbls = _lbls[:, :4]
+                        if FLAGS.net_type == 'BBOX': _lbls = _lbls[:, :4]
+                        elif FLAGS.net_type == 'CEN': _lbls = _lbls[:, 4:6]
 
                         # use numpy to print only the first sig fig
                         np.set_printoptions(precision=3, suppress=True, linewidth=150)
@@ -176,9 +179,15 @@ def train():
                         print('*** MSE = %.4f,  Labels/Logits: ***' % _MSELoss)
                         for z in range(10):
                             this_MAE = np.mean(np.absolute(_logs[z] - _lbls[z]))
-                            print('%s -- %.3f/%.3f, %.3f/%.3f, %.3f/%.3f, %.3f/%.3f for an MAE of %.2f%%'
-                                  % (_id[z], _lbls[z, 0], _logs[z, 0], _lbls[z, 1], _logs[z, 1], _lbls[z, 2],
-                                     _logs[z, 2], _lbls[z, 3], _logs[z, 3], this_MAE * 100))
+
+                            if FLAGS.net_type == 'BBOX':
+                                print('%s -- %.3f/%.3f, %.3f/%.3f, %.3f/%.3f, %.3f/%.3f for an MAE of %.2f%%'
+                                      % (_id[z], _lbls[z, 0], _logs[z, 0], _lbls[z, 1], _logs[z, 1], _lbls[z, 2],
+                                         _logs[z, 2], _lbls[z, 3], _logs[z, 3], this_MAE * 100))
+
+                            if FLAGS.net_type == 'CEN':
+                                print('%s -- %.3f/%.3f, %.3f/%.3f, for an MAE of %.2f%%'
+                                      % (_id[z], _lbls[z, 0], _logs[z, 0], _lbls[z, 1], _logs[z, 1], this_MAE * 100))
 
                         # Run a session to retrieve our summaries
                         summary = mon_sess.run(all_summaries, feed_dict={phase_train: True})

@@ -100,17 +100,18 @@ def pre_proc_localizations(box_dims=1024):
             # print('DICOM Error: %s' %e)
             continue
 
-        # # TODO: Test, display the box
-        # cn = [gtbox['y'] + gtbox['height'] // 2, gtbox['x'] + gtbox['width'] // 2]
-        # size = [gtbox['height'], gtbox['width']]
-        # box_image = sdl.generate_box(image, cn, size, dim3d=False)[0]
-        # title = ('Dims: %s' %gtbox)
-        # disp = ('Shape: %sx%s' %(image.shape[0], image.shape[1]))
-        # sdd.display_single_image(image, False, disp)
-        # sdd.display_single_image(box_image, title=title)
+        # TODO: Test, display the box
+        cn = [gtbox['y'] + (gtbox['height'] // 2), gtbox['x'] + (gtbox['width'] // 2)]
+        size = [gtbox['height'], gtbox['width']]
+        box_image = sdl.generate_box(image, cn, size, dim3d=False)[0]
+        title = ('Dims: %s' %gtbox)
+        disp = ('Shape: %sx%s' %(image.shape[0], image.shape[1]))
+        sdd.display_single_image(image, False, disp)
+        sdd.display_single_image(box_image, False, title=title)
 
         # Normalize the gtbox, to [ymin, xmin, ymax, xmax, cny, cnx, height, width, origshapey, origshapex]
         shape = image.shape
+        gtbox_orig = gtbox
         gtbox = np.asarray([gtbox['y'], gtbox['x'], gtbox['y'] + gtbox['height'], gtbox['x'] + gtbox['width'],
                             gtbox['y']+(gtbox['height']/2), gtbox['x']+(gtbox['width']/2), gtbox['height'], gtbox['width']])
         norm_gtbox = np.asarray([gtbox[0]/shape[0], gtbox[1]/shape[1],
@@ -280,3 +281,5 @@ class DataPreprocessor(object):
     record['data'] = image
 
     return record
+
+#pre_proc_localizations(512)

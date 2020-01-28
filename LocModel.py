@@ -65,7 +65,44 @@ def forward_pass(images, phase_train):
     return Logits
 
 
-def total_loss(logits, labels):
+def forward_pass_center(images, phase_train):
+
+    """
+    Train a 2 dimensional network. Default input size 512x512
+    :param images: tuple (full size images, scaled down by 8 aka 64)
+    :param phase_train: True if this is the training phase
+    :return: L2 Loss and Logits
+    """
+
+    # Initial kernel size
+    K = 4
+    scaled_images = images[1]
+    images = tf.expand_dims(images[0], -1)
+
+    # Channel wise layers. Inputs = batchx512x512
+    conv = sdn.convolution('Conv1', images, 3, K, phase_train=phase_train) # 256
+    conv = sdn.convolution('Conv2', conv, 3, K * 2, phase_train=phase_train) # 128
+    conv = sdn.convolution('Conv2b', conv, 3, K * 2, 1, phase_train=phase_train)
+    conv = sdn.residual_layer('Conv3', conv, 3, K * 4, phase_train=phase_train) # 64
+    # Add scaled image
+    conv = tf.concat([conv, scaled_images], -1)
+    conv = sdn.inception_layer('Conv3a', conv, K * 4, S=1, phase_train=phase_train)
+    conv = sdn.residual_layer('Conv3b', conv, 3, K * 4, 1, phase_train=phase_train)
+    conv = sdn.residual_layer('Conv4', conv, 3, K * 8, phase_train=phase_train) # 32
+    conv = sdn.residual_layer('Conv4b', conv, 3, K * 8, 1, phase_train=phase_train)
+    conv = sdn.inception_layer('Conv5', conv, K * 16, S=2, phase_train=phase_train) # 16
+    conv = sdn.inception_layer('Conv6', conv, K * 32, S=2, phase_train=phase_train)  # 8
+    conv = sdn.residual_layer('Conv7', conv, 3, K * 64, S=2, phase_train=phase_train)
+
+    # Linear layers for center
+    linear = sdn.fc7_layer('FC7', conv, 8, True, phase_train, FLAGS.dropout_factor, override=3, BN=True)
+    linear = sdn.linear_layer('Linear', linear, 4, True, phase_train, FLAGS.dropout_factor, BN=True)
+    Logits = sdn.linear_layer('Softmax', linear, 2, relu=False, add_bias=False, BN=False)
+
+    return Logits
+
+
+def total_loss(logits, labels, type='BBOX'):
 
     """
     Add loss to the trainable variables and a summary
@@ -76,10 +113,17 @@ def total_loss(logits, labels):
     labels = tf.squeeze(labels)
     logits = tf.squeeze(logits)
 
-    # Calculate loss
-    loss = 0
-    for var in range(4):
-        loss += tf.reduce_mean(tf.square(logits[:, var] - labels[:, var]))
+    # Calculate loss for bounding box
+    if type=='BBOX':
+        loss = 0
+        for var in range(4):
+            loss += tf.reduce_mean(tf.square(logits[:, var] - labels[:, var]))
+
+    # Calculate loss for center
+    elif type=='CEN':
+        lossy = tf.reduce_mean(tf.square(logits[:, 0] - labels[:, 4]))
+        lossx = tf.reduce_mean(tf.square(logits[:, 1] - labels[:, 5]))
+        loss = lossy + lossx
 
     # Output the summary of the MSE and MAE
     tf.summary.scalar('MAE_Loss', loss)
@@ -103,7 +147,8 @@ def backward_pass(total_loss):
     tf.summary.scalar('Total_Loss', total_loss)
 
     # Decay the learning rate
-    dk_steps = int((FLAGS.epoch_size / FLAGS.batch_size) * (FLAGS.num_epochs/4))
+    #dk_steps = int((FLAGS.epoch_size / FLAGS.batch_size) * (FLAGS.num_epochs/4))
+    dk_steps = int((FLAGS.epoch_size / FLAGS.batch_size) * 125)
     lr_decayed = tf.train.cosine_decay_restarts(FLAGS.learning_rate, global_step, dk_steps)
 
     # Compute the gradients. NAdam optimizer came in tensorflow 1.2
