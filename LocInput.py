@@ -25,12 +25,13 @@ home_dir = '/home/stmutasa/Code/Datasets/Scaphoid/'
 
 test_loc_folder = home_dir + 'Test/'
 cleanCR_folder = home_dir + 'Cleaned_CR_Single/'
+tfrecords_dir = home_dir + 'tfrecords/'
 
 sdl = SDL.SODLoader(data_root=home_dir)
 sdd = SDD.SOD_Display()
 
 
-def pre_proc_localizations(box_dims=128, thresh=0.5):
+def pre_proc_localizations(box_dims=64, thresh=0.5):
 
     """
     Pre processes the input for the localization network
@@ -86,6 +87,8 @@ def pre_proc_localizations(box_dims=128, thresh=0.5):
 
         # Append IOUs
         IOUs = _iou_calculate(anchors[:, :4], gtbox[:4])
+        if np.max(IOUs) <= thresh:
+            print ('Skipping low IOU patient: %s (%s)' %(dst_File, np.max(IOUs)))
         anchors = np.append(anchors, IOUs, axis=1)
 
         # Normalize the GT boxes
@@ -106,8 +109,6 @@ def pre_proc_localizations(box_dims=128, thresh=0.5):
 
             # Reshape the box to a standard dimension: 128x128
             anchor_box = sdl.zoom_2D(anchor_box, [box_dims, box_dims]).astype(np.float16)
-            # Would love to but takes too much time:
-            # anchor_box = sdl.adaptive_normalization(anchor_box)
 
             # Norm the anchor box dimensions
             anchor = [
@@ -142,24 +143,25 @@ def pre_proc_localizations(box_dims=128, thresh=0.5):
 
         # Increment patient counters
         pt += 1
-        print ('Patient %s: %s, Boxes: %s Shape: %s Max IOU: %.3f'
-               %(index, dst_File, index-lap_count, image.shape, np.max(IOUs)))
+        # print ('Patient %s: %s, Boxes: %s Shape: %s Max IOU: %.3f'
+        #        %(index, dst_File, index-lap_count, image.shape, np.max(IOUs)))
         lap_count = index
         del image
 
         # Save q 15 patients
-        if pt % 15 == 0:
-            if pt < 28: sdl.save_dict_filetypes(data[0])
-            ID = pt//15
-            sdl.save_tfrecords(data, 1, file_root=('data/BOX_LOCS%s' %ID))
+        if pt % 55 == 0:
+            if pt < 55: sdl.save_dict_filetypes(data[0])
+            print('\nMade %s bounding boxes SO FAR from %s patients. %s Positive and %s Negative (%.6f %%)'
+                  % (index, pt, counter[1], counter[0], 100*counter[1]/index))
+            sdl.save_tfrecords(data, 1, file_root=('%s/BOX_LOCS%s' %(tfrecords_dir, pt//55)))
             del data
             data = {}
 
     # Save the data.
-    sdl.save_tfrecords(data, 1, file_root='data/BOX_LOCSFin')
+    sdl.save_tfrecords(data, 1, file_root=('%s/BOX_LOCSFin' %tfrecords_dir))
 
     # Done with all patients
-    print('Made %s bounding boxes from %s patients. %s Positive and %s Negative (%s %%)'
+    print('\nMade %s bounding boxes from %s patients. %s Positive and %s Negative (%s %%)'
           %(index, pt, counter[1], counter[0], index/counter[1]))
 
 
@@ -317,12 +319,20 @@ def _filter_outside_anchors(anchors, img_dim):
 def load_protobuf(training=True):
 
     """
-    Loads the protocol buffer into a form to send to shuffle. No need to oversample for the localization
+    Loads the protocol buffer into a form to send to shuffle. To oversample classes we made some mods...
+    Load with parallel interleave -> Prefetch -> Large Shuffle -> Parse labels -> Undersample map -> Flat Map
+    -> Prefetch -> Oversample Map -> Flat Map -> Small shuffle -> Prefetch -> Parse images -> Augment -> Prefetch -> Batch
     """
 
+    # Save the data to [0ymin, 1xmin, 2ymax, 3xmax, cny, cnx, 6height, 7width, 8origshapey, 9origshapex,
+    #    10yamin, 11xamin, 12yamax, 13xamax, 14acny, 15acnx, 16aheight, 17awidth, 18IOU, 19obj_class, 20#_class]
+
     # Lambda functions for retreiving our protobuf
-    _parse_all = lambda dataset: sdl.load_tfrecords(dataset, [FLAGS.box_dims, FLAGS.box_dims], tf.float32,
-                                                    'box_data', tf.float32, [10])
+    _parse_labels = lambda dataset: sdl.load_tfrecord_labels(dataset)
+    _parse_images = lambda dataset: sdl.load_tfrecord_images(dataset, [FLAGS.box_dims, FLAGS.box_dims], tf.float16,
+                                                             'bbox_data', tf.float16, [21])
+    _parse_all = lambda dataset: sdl.load_tfrecords(dataset, [FLAGS.box_dims, FLAGS.box_dims], tf.float16,
+                                                    'bbox_data', tf.float16, [21])
 
     # Load tfrecords with parallel interleave if training
     if training:
@@ -339,10 +349,27 @@ def load_protobuf(training=True):
     # Shuffle and repeat if training phase
     if training:
 
-        # Large shuffle
+        # Define our undersample and oversample filtering functions
+        _filter_fn = lambda x: sdl.undersample_filter(x['bbox_data'][19], actual_dists=[0.997, 0.003], desired_dists=[.9, .1])
+        _undersample_filter = lambda x: dataset.filter(_filter_fn)
+        _oversample_filter = lambda x: tf.data.Dataset.from_tensors(x).repeat(
+            sdl.oversample_class(x['bbox_data'][19], actual_dists=[0.33, 0.67], desired_dists=[.9, .1]))
+
+        # Large shuffle, repeat for xx epochs then parse the labels only
         dataset = dataset.shuffle(buffer_size=FLAGS.epoch_size)
         dataset = dataset.repeat(FLAGS.repeats)
-        dataset = dataset.map(_parse_all, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        dataset = dataset.map(_parse_labels, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+
+        # Now we have the labels, undersample then oversample.
+        # Map allows us to do it in parallel and flat_map's identity function merges the survivors
+        dataset = dataset.map(_undersample_filter, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        dataset = dataset.flat_map(lambda x: x)
+        dataset = dataset.map(_oversample_filter, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        dataset = dataset.flat_map(lambda x: x)
+
+        # Now perform a small shuffle in case we duplicated neighbors, then prefetch before the final map
+        dataset = dataset.shuffle(buffer_size=100)
+        dataset = dataset.map(_parse_images, num_parallel_calls=tf.data.experimental.AUTOTUNE)
 
     else:
         dataset = dataset.map(_parse_all, num_parallel_calls=tf.data.experimental.AUTOTUNE)
@@ -380,12 +407,12 @@ class DataPreprocessor(object):
 
         # Data Augmentation ------------------ Flip, Contrast, brightness, noise
 
+        # Save the data to [0ymin, 1xmin, 2ymax, 3xmax, cny, cnx, 6height, 7width, 8origshapey, 9origshapex,
+        #    10yamin, 11xamin, 12yamax, 13xamax, 14acny, 15acnx, 16aheight, 17awidth, 18IOU, 19obj_class, 20#_class]
+
         # Resize to network size
         image = tf.expand_dims(image, -1)
         image = tf.image.resize_images(image, [FLAGS.network_dims, FLAGS.network_dims], tf.compat.v1.image.ResizeMethod.BICUBIC)
-
-        # Keep track of distortions done
-        record['distortion'] = ''
 
         # Randomly flip
         def flip(mode=None):
@@ -393,32 +420,19 @@ class DataPreprocessor(object):
             # When flipping, consider that the top left and bottom right corners represent different points now
             ld = record['box_data']
 
-            # For now don't do vertical flip. It doesn't make a ton of sense
-            # box_data = [0ymin, 1xmin, 2ymax, 3xmax, 4cny, 5cnx, 6height, 7width, 8origshapey, 9origshapex]
             if mode == 1:
 
-                if FLAGS.net_type == 'BBOX':
-                    # img = tf.image.flip_up_down(image) # Vertical flip:
-                    # ld0 = (1 - ld[0]) - ld[6] # y=(1-y) - Height to keep top left corner at top left
-                    # ld2 = (1 - ld[2]) + ld[6] # y=(1-y) + Height to keep bottom right at bottom right
-                    # ld4 = 1 - ld[4] # Flip center point Y-axis
-                    # stacked = tf.stack([ld0, ld[1], ld2, ld[3], ld4, ld[5], ld[6], ld[7], ld[8], ld[9]])
-                    stacked, img = ld, image
-
-                elif FLAGS.net_type == 'CEN':
-                    img = tf.image.flip_up_down(image) # Vertical flip:
-                    ld0 = (1 - ld[0]) - ld[6] # y=(1-y) - Height to keep top left corner at top left
-                    ld2 = (1 - ld[2]) + ld[6] # y=(1-y) + Height to keep bottom right at bottom right
-                    ld4 = 1 - ld[4] # Flip center point Y-axis
-                    stacked = tf.stack([ld0, ld[1], ld2, ld[3], ld4, ld[5], ld[6], ld[7], ld[8], ld[9]])
+                # Don't do vertical flip. It doesn't make a ton of sense
+                stacked, img = ld, image
 
             elif mode == 2:
 
                 img = tf.image.flip_left_right(image) # Horizontal flip
-                ld1 = (1 - ld[1]) - ld[7] # x=(1-x) - Width to keep top left corner at top left
-                ld3 = (1 - ld[3]) + ld[7] # x=(1-x) + width to keep bottom right at bottom right
-                ld5 = 1 - ld[5] # Flip center point X axis
-                stacked = tf.stack([ld[0], ld1, ld[2], ld3, ld[4], ld5, ld[6], ld[7], ld[8], ld[9]])
+                # ld1 = (1 - ld[1]) - ld[7] # x=(1-x) - Width to keep top left corner at top left
+                # ld3 = (1 - ld[3]) + ld[7] # x=(1-x) + width to keep bottom right at bottom right
+                # ld5 = 1 - ld[5] # Flip center point X axis
+                # stacked = tf.stack([ld[0], ld1, ld[2], ld3, ld[4], ld5, ld[6], ld[7], ld[8], ld[9]])
+                stacked = ld
 
             else: stacked, img = ld, image
 
@@ -432,10 +446,10 @@ class DataPreprocessor(object):
         image = tf.image.random_brightness(image, max_delta=2)
         image = tf.image.random_contrast(image, lower=0.995, upper=1.005)
 
-        # Randomly jiggle locations by up to 1.5% of image dims
-        rn, lr = [], record['box_data']
-        for z in range(6): rn.append(tf.random.uniform([], minval=-0.015, maxval=0.015, dtype=tf.float32))
-        record['box_data'] = tf.stack([lr[0]+rn[0], lr[1]+rn[1], lr[2]+rn[2], lr[3]+rn[3], lr[4]+rn[4], lr[5]+rn[5], lr[6], lr[7], lr[8], lr[9]])
+        # # Randomly jiggle locations by up to 1.5% of image dims
+        # rn, lr = [], record['box_data']
+        # for z in range(6): rn.append(tf.random.uniform([], minval=-0.015, maxval=0.015, dtype=tf.float32))
+        # record['box_data'] = tf.stack([lr[0]+rn[0], lr[1]+rn[1], lr[2]+rn[2], lr[3]+rn[3], lr[4]+rn[4], lr[5]+rn[5], lr[6], lr[7], lr[8], lr[9]])
 
         # For noise, first randomly determine how 'noisy' this study will be
         T_noise = tf.random.uniform([], 0, 0.02)
@@ -446,16 +460,11 @@ class DataPreprocessor(object):
         # Add the poisson noise
         image = tf.add(image, tf.cast(noise, tf.float32))
 
-        # Make a small dummy image for advanced localization
-        record['img_small'] = tf.image.resize_images(image, [FLAGS.network_dims // 8, FLAGS.network_dims // 8],
-                                                     tf.compat.v1.image.ResizeMethod.BICUBIC)
-
     else: # Validation
 
         # Resize to network size
         image = tf.expand_dims(image, -1)
         image = tf.image.resize_images(image, [FLAGS.network_dims, FLAGS.network_dims], tf.compat.v1.image.ResizeMethod.BICUBIC)
-        record['img_small'] = tf.image.resize_images(image, [FLAGS.network_dims//8, FLAGS.network_dims//8], tf.compat.v1.image.ResizeMethod.BICUBIC)
 
     # Make record image
     record['data'] = image
@@ -463,4 +472,4 @@ class DataPreprocessor(object):
     return record
 
 
-pre_proc_localizations(64)
+#pre_proc_localizations(64)

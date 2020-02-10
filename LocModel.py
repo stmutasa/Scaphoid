@@ -18,81 +18,49 @@ sdn = SDN.SODMatrix()
 sdloss = SDN.SODLoss(2)
 
 
-def forward_pass(images, phase_train):
+def forward_pass_RPN(images, phase_train):
 
     """
-    Train a 2 dimensional network. Default input size 512x512
+    Train a 2 dimensional network. Default input size 64x64
     :param images: tuple (full size images, scaled down by 8 aka 64)
     :param phase_train: True if this is the training phase
     :return: L2 Loss and Logits
     """
 
     # Initial kernel size
-    K = 4
-    scaled_images = images[1]
+    K = 8
     images = tf.expand_dims(images[0], -1)
 
-    # Channel wise layers. Inputs = batchx512x512
-    conv = sdn.convolution('Conv1', images, 3, K, phase_train=phase_train) # 256
-    conv = sdn.convolution('Conv2', conv, 3, K * 2, phase_train=phase_train) # 128
-    conv = sdn.convolution('Conv2b', conv, 3, K * 2, 1, phase_train=phase_train)
-    conv = sdn.residual_layer('Conv3', conv, 3, K * 4, phase_train=phase_train) # 64
-    # Add scaled image
-    conv = tf.concat([conv, scaled_images], -1)
-    conv = sdn.inception_layer('Conv3a', conv, K * 4, S=1, phase_train=phase_train)
+    # Channel wise layers. Inputs = batchx64x64x64
+    conv = sdn.residual_layer('Conv1', images, 3, K, S=1, phase_train=phase_train) # 64
+    conv = sdn.inception_layer('Conv1ds', conv, K * 2, S=2, phase_train=phase_train) # 32
+
+    conv = sdn.residual_layer('Conv2a', conv, 3, K * 2, 1, phase_train=phase_train)
+    conv = sdn.residual_layer('Conv2b', conv, 3, K * 2, 1, phase_train=phase_train)
+    conv = sdn.inception_layer('Conv2ds', conv, K * 4, S=2, phase_train=phase_train)  # 32
+
+    conv = sdn.residual_layer('Conv3a', conv, 3, K * 4, 1, phase_train=phase_train)
     conv = sdn.residual_layer('Conv3b', conv, 3, K * 4, 1, phase_train=phase_train)
-    conv = sdn.residual_layer('Conv4', conv, 3, K * 8, phase_train=phase_train) # 32
-    conv = sdn.residual_layer('Conv4b', conv, 3, K * 8, 1, phase_train=phase_train)
-    conv = sdn.inception_layer('Conv5', conv, K * 16, S=2, phase_train=phase_train) # 16
-    conv = sdn.inception_layer('Conv6', conv, K * 32, S=2, phase_train=phase_train)  # 8
+    conv = sdn.residual_layer('Conv3c', conv, 3, K * 4, 1, phase_train=phase_train)
+    conv = sdn.inception_layer('Conv3ds', conv, K * 8, S=2, phase_train=phase_train)  # 16
 
-    # Split top left and bottom right here
-    conv_TL = sdn.residual_layer('Conv_TopLeft', conv, 3, K * 64, S=2, phase_train=phase_train)
-    conv_BR = sdn.residual_layer('Conv_BotRight', conv, 3, K * 64, S=2, phase_train=phase_train)
+    conv = sdn.residual_layer('Conv4a', conv, 3, K * 8, 1, phase_train=phase_train)
+    conv = sdn.inception_layer('Conv4b', conv, K * 8, S=1, phase_train=phase_train)
+    conv = sdn.residual_layer('Conv4c', conv, 3, K * 8, 1, phase_train=phase_train)
+    conv = sdn.inception_layer('Conv4ds', conv, K * 16, S=2, phase_train=phase_train)  # 8
 
-    # Linear layers for top left
-    linearTL = sdn.fc7_layer('FC7TL', conv_TL, 8, True, phase_train, FLAGS.dropout_factor, override=3, BN=True)
-    linearTL = sdn.linear_layer('LinearTL', linearTL, 4, True, phase_train, FLAGS.dropout_factor, BN=True)
-    LogitsTL = sdn.linear_layer('SoftmaxTL', linearTL, 2, relu=False, add_bias=False, BN=False)
-    # Linear layers for bottom right
-    linearBR = sdn.fc7_layer('FC7BR', conv_BR, 8, True, phase_train, FLAGS.dropout_factor, override=3, BN=True)
-    linearBR = sdn.linear_layer('LinearBR', linearBR, 4, True, phase_train, FLAGS.dropout_factor, BN=True)
-    LogitsBR = sdn.linear_layer('SoftmaxBR', linearBR, 2, relu=False, add_bias=False, BN=False)
+    conv = sdn.residual_layer('Conv5a', conv, 3, K * 16, 1, phase_train=phase_train)
+    conv = sdn.inception_layer('Conv5b', conv, K * 16, S=1, phase_train=phase_train)
+    conv = sdn.inception_layer('Conv5c', conv, K * 16, S=1, phase_train=phase_train)
+    conv = sdn.inception_layer('Conv5d', conv, K * 32, S=2, phase_train=phase_train)  # 4
 
-    # Add logits along batchxnum axis 1
-    Logits = tf.concat([LogitsTL, LogitsBR], 1)
+    conv = sdn.residual_layer('Conv6a', conv, 3, K * 32, 1, phase_train=phase_train)
+    conv = sdn.inception_layer('Conv6b', conv, K * 32, S=1, phase_train=phase_train)
+    conv = sdn.residual_layer('Conv6c', conv, 3, K * 32, 1, phase_train=phase_train)
+    conv = sdn.residual_layer('Conv6d', conv, 3, K * 32, 1, phase_train=phase_train)
+    conv = sdn.residual_layer('Conv6e', conv, 3, K * 32, 1, phase_train=phase_train)
 
-    return Logits
-
-
-def forward_pass_center(images, phase_train):
-
-    """
-    Train a 2 dimensional network. Default input size 512x512
-    :param images: tuple (full size images, scaled down by 8 aka 64)
-    :param phase_train: True if this is the training phase
-    :return: L2 Loss and Logits
-    """
-
-    # Initial kernel size
-    K = 4
-    scaled_images = images[1]
-    images = tf.expand_dims(images[0], -1)
-
-    # Channel wise layers. Inputs = batchx512x512
-    conv = sdn.convolution('Conv1', images, 3, K, phase_train=phase_train) # 256
-    conv = sdn.convolution('Conv2', conv, 3, K * 2, phase_train=phase_train) # 128
-    conv = sdn.convolution('Conv2b', conv, 3, K * 2, 1, phase_train=phase_train)
-    conv = sdn.residual_layer('Conv3', conv, 3, K * 4, phase_train=phase_train) # 64
-    # Add scaled image
-    conv = tf.concat([conv, scaled_images], -1)
-    conv = sdn.inception_layer('Conv3a', conv, K * 4, S=1, phase_train=phase_train)
-    conv = sdn.residual_layer('Conv3b', conv, 3, K * 4, 1, phase_train=phase_train)
-    conv = sdn.residual_layer('Conv4', conv, 3, K * 8, phase_train=phase_train) # 32
-    conv = sdn.residual_layer('Conv4b', conv, 3, K * 8, 1, phase_train=phase_train)
-    conv = sdn.inception_layer('Conv5', conv, K * 16, S=2, phase_train=phase_train) # 16
-    conv = sdn.inception_layer('Conv6', conv, K * 32, S=2, phase_train=phase_train)  # 8
-    conv = sdn.residual_layer('Conv7', conv, 3, K * 64, S=2, phase_train=phase_train)
+    # TODO: RPN has class logits and BBox logits, need another branch
 
     # Linear layers for center
     linear = sdn.fc7_layer('FC7', conv, 8, True, phase_train, FLAGS.dropout_factor, override=3, BN=True)
@@ -102,36 +70,57 @@ def forward_pass_center(images, phase_train):
     return Logits
 
 
-def total_loss(logits, labels, type='BBOX'):
+def total_loss(logits, labels):
 
     """
     Add loss to the trainable variables and a summary
-    box_data = [0ymin, 1xmin, 2ymax, 3xmax, 4cny, 5cnx, 6height, 7width, 8origshapey, 9origshapex]
     """
+
+    # Saved the data to [0ymin, 1xmin, 2ymax, 3xmax, cny, cnx, 6height, 7width, 8origshapey, 9origshapex,
+    #    10yamin, 11xamin, 12yamax, 13xamax, 14acny, 15acnx, 16aheight, 17awidth, 18IOU, 19obj_class, 20#_class]
+
 
     # Squish
     labels = tf.squeeze(labels)
     logits = tf.squeeze(logits)
 
-    # Calculate loss for bounding box
-    if type=='BBOX':
-        loss = 0
-        for var in range(4):
-            loss += tf.reduce_mean(tf.square(logits[:, var] - labels[:, var]))
+    # Make an object mask and multiply this mask by scaling factor then add back to labels. Add 1 to prevent 0 loss
+    object_mask = tf.cast(labels[19] >= 0.1, tf.float32)
+    object_mask = tf.add(tf.multiply(object_mask, FLAGS.loss_factor), 1)
 
-    # Calculate loss for center
-    elif type=='CEN':
-        lossy = tf.reduce_mean(tf.square(logits[:, 0] - labels[:, 4]))
-        lossx = tf.reduce_mean(tf.square(logits[:, 1] - labels[:, 5]))
-        loss = lossy + lossx
+    # Calculate loss for bounding box only if it's on an object with ROI > 0.05
+    # TODO: Apply object mask
+    # if FLAGS.loss_factor != 1.0: loss = tf.multiply(loss, tf.squeeze(lesion_mask))
+    L1_loss, L2_loss = 0, 0
+    for var in range(4):
+        L2_loss += tf.reduce_mean(tf.square(logits[:, var] - labels[:, var]))
+        L1_loss += tf.reduce_mean(tf.abs(logits[:, var] - labels[:, var]))
+    loc_loss = (L1_loss + L2_loss) / 2
+
+
+    # Change labels to one hot
+    labels = tf.one_hot(tf.cast(labels[19], tf.uint8), depth=FLAGS.num_classes, dtype=tf.uint8)
+
+    # Calculate  loss
+    class_loss = tf.nn.softmax_cross_entropy_with_logits_v2(labels=tf.squeeze(labels), logits=logits)
+
+    # Reduce to scalar
+    class_loss = tf.reduce_mean(class_loss)
+
+    # Add losses
+    total_loss = 10*class_loss + loc_loss
 
     # Output the summary of the MSE and MAE
-    tf.summary.scalar('MAE_Loss', loss)
+    tf.summary.scalar('Class_Loss', class_loss)
+    tf.summary.scalar('Loc_Loss', loc_loss)
+    tf.summary.scalar('Tot_Loss', total_loss)
 
     # Add these losses to the collection
-    tf.add_to_collection('losses', loss)
+    tf.add_to_collection('losses', class_loss)
+    tf.add_to_collection('losses', loc_loss)
+    tf.add_to_collection('losses', total_loss)
 
-    return loss
+    return total_loss
 
 
 def backward_pass(total_loss):
@@ -148,7 +137,7 @@ def backward_pass(total_loss):
 
     # Decay the learning rate
     #dk_steps = int((FLAGS.epoch_size / FLAGS.batch_size) * (FLAGS.num_epochs/4))
-    dk_steps = int((FLAGS.epoch_size / FLAGS.batch_size) * 125)
+    dk_steps = int((FLAGS.epoch_size / FLAGS.batch_size) * 15)
     lr_decayed = tf.train.cosine_decay_restarts(FLAGS.learning_rate, global_step, dk_steps)
 
     # Compute the gradients. NAdam optimizer came in tensorflow 1.2

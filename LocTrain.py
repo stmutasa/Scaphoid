@@ -18,20 +18,20 @@ FLAGS = tf.app.flags.FLAGS
 # Define some of the data variables
 tf.app.flags.DEFINE_string('data_dir', 'data/train/', """Path to the data directory.""")
 tf.app.flags.DEFINE_string('training_dir', 'training/', """Path to the training directory.""")
-tf.app.flags.DEFINE_integer('box_dims', 1024, """dimensions to save files""")
-tf.app.flags.DEFINE_integer('network_dims', 512, """dimensions of the network input""")
-tf.app.flags.DEFINE_integer('repeats', 10, """epochs to repeat before reloading""")
-tf.app.flags.DEFINE_string('net_type', 'CEN', """Network predicting CEN or BBOX""")
+tf.app.flags.DEFINE_integer('box_dims', 64, """dimensions to save files""")
+tf.app.flags.DEFINE_integer('network_dims', 64, """dimensions of the network input""")
+tf.app.flags.DEFINE_integer('repeats', 20, """epochs to repeat before reloading""")
+tf.app.flags.DEFINE_string('net_type', 'RPN', """Network predicting CEN, BBOX or RPN""")
 
 # Define some of the immutable variables
-tf.app.flags.DEFINE_integer('num_epochs', 3000, """Number of epochs to run""")
-tf.app.flags.DEFINE_integer('epoch_size', 468, """How many examples""")
-tf.app.flags.DEFINE_integer('print_interval', 5, """How often to print a summary to console during training""")
-tf.app.flags.DEFINE_integer('checkpoint_interval', 25, """How many Epochs to wait before saving a checkpoint""")
-tf.app.flags.DEFINE_integer('batch_size', 64, """Number of images to process in a batch.""")
+tf.app.flags.DEFINE_integer('num_epochs', 100, """Number of epochs to run""")
+tf.app.flags.DEFINE_integer('epoch_size', 4e7, """How many examples""")
+tf.app.flags.DEFINE_integer('print_interval', 1, """How often to print a summary to console during training""")
+tf.app.flags.DEFINE_integer('checkpoint_interval', 5, """How many Epochs to wait before saving a checkpoint""")
+tf.app.flags.DEFINE_integer('batch_size', 2048, """Number of images to process in a batch.""")
 
 # Hyperparameters:
-tf.app.flags.DEFINE_float('dropout_factor', 0.5, """ Keep probability""")
+tf.app.flags.DEFINE_float('dropout_factor', 0.75, """ Keep probability""")
 tf.app.flags.DEFINE_float('l2_gamma', 1e-3, """ The gamma value for regularization loss""")
 tf.app.flags.DEFINE_float('moving_avg_decay', 0.999, """ The decay rate for the moving average tracker""")
 
@@ -43,7 +43,7 @@ tf.app.flags.DEFINE_float('beta2', 0.999, """ The beta 1 value for the adam opti
 # Directory control
 tf.app.flags.DEFINE_string('train_dir', 'training/', """Directory to write event logs and save checkpoint files""")
 tf.app.flags.DEFINE_string('RunInfo', 'Center/', """Unique file name for this training run""")
-tf.app.flags.DEFINE_integer('GPU', 1, """Which GPU to use""")
+tf.app.flags.DEFINE_integer('GPU', 0, """Which GPU to use""")
 
 def train():
 
@@ -61,15 +61,14 @@ def train():
         data['data'] = tf.reshape(data['data'], [FLAGS.batch_size, FLAGS.network_dims, FLAGS.network_dims])
 
         # Perform the forward pass:
-        if FLAGS.net_type == 'BBOX': logits = network.forward_pass((data['data'], data['img_small']), phase_train=phase_train)
-        elif FLAGS.net_type =='CEN': logits = network.forward_pass_center((data['data'], data['img_small']), phase_train=phase_train)
+        logits = network.forward_pass_RPN((data['data'], data['img_small']), phase_train=phase_train)
         l2loss = network.sdn.calc_L2_Loss(FLAGS.l2_gamma)
 
         # Labels
         labels = data['box_data']
 
         # Calculate loss
-        MSE_Loss = network.total_loss(logits, labels, type=FLAGS.net_type)
+        MSE_Loss = network.total_loss(logits, labels)
 
         # Add the L2 regularization loss
         loss = tf.add(MSE_Loss, l2loss, name='TotalLoss')
