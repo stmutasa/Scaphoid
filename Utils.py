@@ -368,8 +368,7 @@ def filter_DICOM(file, show_debug=False):
     """
 
     # Laterality: L, R or UK
-    try:
-        laterality = header['tags'].ImageLaterality.upper()
+    try: laterality = header['tags'].ImageLaterality.upper()
     except:
         try:
             laterality = header['tags'].Laterality.upper()
@@ -390,8 +389,7 @@ def filter_DICOM(file, show_debug=False):
                     laterality = 'UKLAT'
 
     # Accession number
-    try:
-        accno = header['tags'].AccessionNumber
+    try: accno = header['tags'].AccessionNumber
     except:
         try:
             accno = header['tags'].StudyID
@@ -473,11 +471,11 @@ def check_stats():
         # Increment counters
         index += 1
         print ('%s of %s Done' %(index, len(filenames)))
-        nheights.append(norm_gtbox[4])
-        nwidths.append(norm_gtbox[5])
-        heights.append(gtbox[4])
-        widths.append(gtbox[5])
-        ratio.append(gtbox[4]/gtbox[5])
+        nheights.append(norm_gtbox[6])
+        nwidths.append(norm_gtbox[7])
+        heights.append(gtbox[6])
+        widths.append(gtbox[7])
+        ratio.append(gtbox[6]/gtbox[7])
         iheights.append(image.shape[0])
         iwidths.append(image.shape[1])
         del image
@@ -500,4 +498,4 @@ def check_stats():
 # process_raw()
 #raw_to_PNG()
 #check_raw()
-check_stats()
+#check_stats()

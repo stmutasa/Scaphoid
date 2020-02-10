@@ -13,6 +13,7 @@ import SOD_Display as SDD
 from pathlib import Path
 import json
 import os
+import Utils
 
 from random import shuffle
 
@@ -29,7 +30,7 @@ sdl = SDL.SODLoader(data_root=home_dir)
 sdd = SDD.SOD_Display()
 
 
-def pre_proc_localizations(box_dims=1024):
+def pre_proc_localizations(box_dims=128, thresh=0.5):
 
     """
     Pre processes the input for the localization network
@@ -45,103 +46,272 @@ def pre_proc_localizations(box_dims=1024):
     gtboxes = sdl.load_CSV_Dict('filename', 'gtboxes.csv')
 
     # Global variables
-    display, counter, data, data_test, index, pt = [], [0, 0], {}, {}, 0, 0
-    heights, weights = [], []
+    display, counter, data, lap_count, index, pt = [], [0, 0], {}, 0, 0, 0
 
     for file in filenames:
 
-        # Load the Header only first
-        try:
-            header = sdl.load_DICOM_Header(file, False)
-        except Exception as e: continue
-
-        # Retreive the view information
-        try:
-            view = header['tags'].ViewPosition.upper()
-            laterality = header['tags'].ImageLaterality.upper()
-            part = header['tags'].BodyPartExamined.upper()
-            accno = header['tags'].AccessionNumber
-        except Exception as e: continue
-
-        """
-            Some odd values that appear:
-            view: TAN, LATERAL, NAVICULAR, LLO
-            part: PORT WRIST, 
-        """
-
-        # Sometimes lateraity is off
-        if laterality != 'L' and laterality != 'R':
-            if 'RIGHT' in header['tags'].StudyDescription.upper():
-                laterality = 'R'
-            elif 'LEFT' in header['tags'].StudyDescription.upper():
-                laterality = 'L'
-
-        # Skip non wrists or hands
-        if 'WRIST' not in part and 'HAND' not in part:
-            print('Skipping: ', dst_File)
-            continue
+        # Load the info
+        image, view, laterality, part, accno, header = Utils.filter_DICOM(file)
 
         # Set destination filename info
         dst_File = accno + '_' + laterality + '-' + part + '_' + view
 
         # Now compare to the annotations folder
-        try: annotations = gtboxes[dst_File+'.png']['region_shape_attributes']
+        try: annotations = gtboxes[dst_File + '.png']['region_shape_attributes']
         except: continue
 
         # Success, convert the string to a dictionary
         gtbox = json.loads(annotations)
         if not gtbox: continue
 
-        # Success, now load the image and save
+        # Retreive photometric interpretation (1 = negative XRay) if available
         try:
-            image, _, _, photometric, _ = sdl.load_DICOM_2D(file)
+            photometric = int(header['tags'].PhotometricInterpretation[-1])
             if photometric == 1: image *= -1
-        except Exception as e:
-            # print('DICOM Error: %s' %e)
-            continue
+        except: continue
 
-        # TODO: Test, display the box
-        cn = [gtbox['y'] + (gtbox['height'] // 2), gtbox['x'] + (gtbox['width'] // 2)]
-        size = [gtbox['height'], gtbox['width']]
-        box_image = sdl.generate_box(image, cn, size, dim3d=False)[0]
-        title = ('Dims: %s' %gtbox)
-        disp = ('Shape: %sx%s' %(image.shape[0], image.shape[1]))
-        sdd.display_single_image(image, False, disp)
-        sdd.display_single_image(box_image, False, title=title)
-
-        # Normalize the gtbox, to [ymin, xmin, ymax, xmax, cny, cnx, height, width, origshapey, origshapex]
-        shape = image.shape
-        gtbox_orig = gtbox
-        gtbox = np.asarray([gtbox['y'], gtbox['x'], gtbox['y'] + gtbox['height'], gtbox['x'] + gtbox['width'],
-                            gtbox['y']+(gtbox['height']/2), gtbox['x']+(gtbox['width']/2), gtbox['height'], gtbox['width']])
-        norm_gtbox = np.asarray([gtbox[0]/shape[0], gtbox[1]/shape[1],
-                                 gtbox[2]/shape[0], gtbox[3]/shape[1],
-                                 gtbox[4]/shape[0], gtbox[5]/shape[1],
-                                 gtbox[6] / shape[0], gtbox[7] / shape[1],
-                                 shape[0], shape[1]]).astype(np.float32)
-
-        # Resize and normalize the image
-        image = sdl.zoom_2D(image, [box_dims, box_dims])
+        # Normalize image
         image = sdl.adaptive_normalization(image).astype(np.float32)
 
-        # Save the data
-        data[index] = {'data': image, 'box_data': norm_gtbox, 'group': group, 'view': dst_File, 'accno': accno}
+        """
+        Generate the anchor boxes here
+        Base; [.118, .153] or [129.4, 127.7], Scales: [0.68, 1.0, 1.3], Ratios [0.82, 1.05, 1.275]
+        """
+        anchors = generate_anchors(image, [129.4, 127.7], 10, ratios=[0.82, 1.05, 1.275], scales=[0.68, 1.0, 1.3])
 
-        # Increment counters
-        index += 1
+        # Generate a GT box measurement in corner format
+        ms = image.shape
+        gtbox = np.asarray([gtbox['y'], gtbox['x'], gtbox['y'] + gtbox['height'], gtbox['x'] + gtbox['width'],
+                            gtbox['y']+(gtbox['height']/2), gtbox['x']+(gtbox['width']/2), gtbox['height'], gtbox['width']])
+
+        # Append IOUs
+        IOUs = _iou_calculate(anchors[:, :4], gtbox[:4])
+        anchors = np.append(anchors, IOUs, axis=1)
+
+        # Normalize the GT boxes
+        norm_gtbox = np.asarray([gtbox[0]/ms[0], gtbox[1]/ms[1],
+                                 gtbox[2]/ms[0], gtbox[3]/ms[1],
+                                 gtbox[4]/ms[0], gtbox[5]/ms[1],
+                                 gtbox[6] / ms[0], gtbox[7] / ms[1],
+                                 ms[0], ms[1]]).astype(np.float32)
+
+        # Generate boxes by looping through the anchor list
+        for an in anchors:
+
+            # Remember anchor = [10yamin, 11xamin, 12yamax, 13xamax, 14acny, 15acnx, 16aheight, 17awidth, 18IOU]
+            an = an.astype(np.float32)
+
+            # Generate a box at this location
+            anchor_box, _ = sdl.generate_box(image, an[4:6].astype(np.int16), an[6:8].astype(np.int16), dim3d=False)
+
+            # Reshape the box to a standard dimension: 128x128
+            anchor_box = sdl.zoom_2D(anchor_box, [box_dims, box_dims]).astype(np.float16)
+            # Would love to but takes too much time:
+            # anchor_box = sdl.adaptive_normalization(anchor_box)
+
+            # Norm the anchor box dimensions
+            anchor = [
+                an[0]/ms[0], an[1]/ms[1], an[2]/ms[0], an[3]/ms[1], an[4]/ms[0], an[5]/ms[1], an[6]/ms[0], an[7]/ms[1], an[8]
+            ]
+
+            # Append the anchor to the norm box
+            box_data = np.append(norm_gtbox, anchor)
+
+            # Make object and fracture labels = 1 if IOU > threhsold IOU
+            fracture_class = 0
+            if box_data[-1] >= thresh: object_class = 1
+            else: object_class = 0
+            counter[object_class] += 1
+
+            # Append object class and fracture class to box data
+            box_data = np.append(box_data, [object_class, fracture_class]).astype(np.float16)
+
+            # Save the data to [0ymin, 1xmin, 2ymax, 3xmax, cny, cnx, 6height, 7width, 8origshapey, 9origshapex,
+            #    10yamin, 11xamin, 12yamax, 13xamax, 14acny, 15acnx, 16aheight, 17awidth, IOU, obj_class, #_class]
+            data[index] = {'data': anchor_box, 'box_data': box_data, 'group': group, 'view': dst_File, 'accno': accno}
+
+            # # TODO: Testing Append to display if positive
+            # if index % 2000 == 0 or object_class == 1: display.append(anchor_box.astype(np.float32))
+
+            # Increment box count
+            index += 1
+            del anchor_box, an, box_data
+
+        # # TODO: Test, display the box
+        # sdd.display_volume(display, True)
+
+        # Increment patient counters
         pt += 1
-        heights.append(gtbox[4])
-        weights.append(gtbox[5])
+        print ('Patient %s: %s, Boxes: %s Shape: %s Max IOU: %.3f'
+               %(index, dst_File, index-lap_count, image.shape, np.max(IOUs)))
+        lap_count = index
         del image
 
+        # Save q 15 patients
+        if pt % 15 == 0:
+            if pt < 28: sdl.save_dict_filetypes(data[0])
+            ID = pt//15
+            sdl.save_tfrecords(data, 1, file_root=('data/BOX_LOCS%s' %ID))
+            del data
+            data = {}
+
     # Save the data.
-    sdl.save_dict_filetypes(data[0])
-    sdl.save_segregated_tfrecords(4, data, 'accno', 'data/BOX_LOCS')
+    sdl.save_tfrecords(data, 1, file_root='data/BOX_LOCSFin')
 
     # Done with all patients
-    heights, weights = np.asarray(heights), np.asarray(weights)
-    print('Made %s bounding boxes. H/W AVG: %s/%s Max: %s/%s' % (
-    index, np.average(heights), np.average(weights), np.max(heights), np.max(weights)))
+    print('Made %s bounding boxes from %s patients. %s Positive and %s Negative (%s %%)'
+          %(index, pt, counter[1], counter[0], index/counter[1]))
+
+
+def _iou_calculate(boxes1, boxes2):
+
+    """
+    Calculates the IOU of two boxes
+    :param boxes1: [n, 4] [ymin, xmin, ymax, xmax]
+    :param boxes2: [n, 4]
+    :return: Overlaps of each box pair (aka DICE score)
+    """
+
+    # Split the coordinates
+    ymin_1, xmin_1, ymax_1, xmax_1 = np.split(boxes1, indices_or_sections=len(boxes1[1]), axis=1)  # ymin_1 shape is [N, 1]..
+    ymin_2, xmin_2, ymax_2, xmax_2 = np.split(boxes2, indices_or_sections=len(boxes2), axis=0)  # ymin_2 shape is [M, ]..
+
+    # Retreive any overlaps of the corner points of the box
+    max_xmin, max_ymin = np.maximum(xmin_1, xmin_2), np.maximum(ymin_1, ymin_2)
+    min_xmax, min_ymax = np.minimum(xmax_1, xmax_2), np.minimum(ymax_1, ymax_2)
+
+    # Retreive overlap along each dimension: Basically if the upper right corner of one box is above the lower left of another, there is overlap
+    overlap_h = np.maximum(0., min_ymax - max_ymin)  # avoid h < 0
+    overlap_w = np.maximum(0., min_xmax - max_xmin)
+
+    # Cannot overlap if one of the dimension overlaps is 0
+    overlaps = overlap_h * overlap_w
+
+    # Calculate the area of each box
+    area_1 = (xmax_1 - xmin_1) * (ymax_1 - ymin_1)  # [N, 1]
+    area_2 = (xmax_2 - xmin_2) * (ymax_2 - ymin_2)  # [M, ]
+
+    # Calculate overlap (intersection) over union like Dice score. Union is just the areas added minus the overlap
+    iou = overlaps / (area_1 + area_2 - overlaps)
+
+    return iou
+
+
+def generate_anchors(image, base_anchor_size, feature_stride, ratios, scales):
+
+    """
+    For generating anchor boxes
+    :param image: The input image over which we generate anchors
+    :param base_anchor_size: The base anchor size for this feature map
+    :param feature_stride: int, stride of feature map relative to the image in pixels
+    :param ratios: [1D array] of anchor ratios of width/height. i.e [0.5, 1, 2]
+    :param scales: [1D array] of anchor scales in original space
+    :return:
+    """
+
+    # Make Numpy Arrays
+    if type(base_anchor_size) is not np.ndarray: base_anchor_size = np.asarray(base_anchor_size)
+    if type(ratios) is not np.ndarray: ratios = np.asarray(ratios)
+    if type(scales) is not np.ndarray: scales = np.asarray(scales)
+
+    # Get shape
+    shapey, shapex = image.shape
+
+    # Generate a base anchor
+    base_anchor = np.array([0, 0, base_anchor_size[0], base_anchor_size[1]], np.float32)
+    base_anchors = _enum_ratios(_enum_scales(base_anchor, scales), ratios)
+    _, _, ws, hs = np.split(base_anchors, indices_or_sections=len(base_anchors[1]), axis=1)
+
+    # Create sequence of numbers
+    y_centers = np.arange(0, shapey, feature_stride)
+    x_centers = np.arange(0, shapex, feature_stride)
+
+    # Broadcast parameters to a grid of x and y coordinates
+    x_centers, y_centers = np.meshgrid(x_centers, y_centers)
+    ws, x_centers = np.meshgrid(ws, x_centers)
+    hs, y_centers = np.meshgrid(hs, y_centers)
+
+    # Stack anchor centers and box sizes. Reshape to get a list of (x, y) and a list of (h, w)
+    anchor_centers = np.reshape(np.stack([x_centers, y_centers], 2), [-1, 2])
+    box_sizes = np.reshape(np.stack([ws, hs], axis=2), [-1, 2])
+
+    # Convert to corner coordinates
+    anchors = np.concatenate([anchor_centers - 0.5 * box_sizes, anchor_centers + 0.5 * box_sizes], axis=1)
+
+    # Append all to one array with anchor [corner coordinates, centers, box_sizes]
+    all = np.append(anchors, np.append(anchor_centers, box_sizes, axis=1), axis=1)
+
+    # Filter outside anchors
+    filtered = _filter_outside_anchors(anchors=all, img_dim=image.shape)
+
+    return filtered
+
+
+def _enum_scales(base_anchor, anchor_scales):
+
+    '''
+    :param base_anchor: [y_center, x_center, h, w]
+    :param anchor_scales: different scales, like [0.5, 1., 2.0]
+    :return: return base anchors in different scales.
+            Example:[[0, 0, 128, 128],[0, 0, 256, 256],[0, 0, 512, 512]]
+    '''
+
+    anchor_scales = base_anchor * np.reshape(np.asarray(anchor_scales, dtype=np.float32), newshape=(len(anchor_scales), 1))
+    return anchor_scales
+
+
+def _enum_ratios(anchors, anchor_ratios):
+
+    '''
+    :param anchors: base anchors in different scales
+    :param anchor_ratios:  ratio = h / w
+    :return: base anchors in different scales and ratios
+    '''
+
+    # Unstack along the vertical dimension
+    _, _, hs, ws = np.split(anchors, indices_or_sections=len(anchors[1]), axis=1)
+
+    # Calculate squares of the anchor ratios
+    sqrt_ratios = np.sqrt(anchor_ratios)
+    sqrt_ratios = np.transpose(np.expand_dims(sqrt_ratios, axis=1))
+
+    # Reshape the anchors
+    ws = np.reshape(ws / sqrt_ratios, [-1])
+    hs = np.reshape(hs * sqrt_ratios, [-1])
+
+    num_anchors_per_location = ws.shape[0]
+
+    ratios = np.transpose(np.stack([np.zeros([num_anchors_per_location, ]), np.zeros([num_anchors_per_location, ]), ws, hs]))
+
+    return ratios
+
+
+def _filter_outside_anchors(anchors, img_dim):
+
+    """
+    Removes anchor proposals with values outside the image
+    :param anchors: The anchor proposals [xmin, ymin, xmax, ymax]
+    :param img_dim: image dimensions (assumes square input)
+    :return: the indices of the anchors not outside the image boundary
+    """
+
+    # Unpack the rank R tensor into multiple rank R-1 tensors along axis
+    ymin, xmin, ymax, xmax, cny, cnx, wh, ww = np.split(anchors, indices_or_sections=len(anchors[1]), axis=1)
+
+    # Return True for indices inside the image
+    xmin_index, ymin_index = np.greater_equal(xmin, 0), np.greater_equal(ymin, 0)
+    xmax_index, ymax_index = np.less_equal(xmax, img_dim[1]), np.less_equal(ymax, img_dim[0])
+
+    # Now clean up the indices and return them
+    indices = np.transpose(np.squeeze(np.stack([ymin_index, xmin_index, ymax_index, xmax_index])))
+    indices = indices.astype(np.float32)
+    indices = np.sum(indices, axis=1)
+    indices = np.where(np.equal(indices, 4.0))
+
+    # Gather the valid anchors
+    valid_anchors = np.squeeze(np.take(anchors, indices, axis=0))
+
+    return valid_anchors
 
 
 def load_protobuf(training=True):
@@ -292,4 +462,5 @@ class DataPreprocessor(object):
 
     return record
 
-#pre_proc_localizations(512)
+
+pre_proc_localizations(64)
