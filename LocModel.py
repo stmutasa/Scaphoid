@@ -29,7 +29,8 @@ def forward_pass_RPN(images, phase_train):
 
     # Initial kernel size
     K = 8
-    images = tf.expand_dims(images[0], -1)
+    images = tf.expand_dims(images, -1)
+    images = tf.cast(images, tf.float32)
 
     # Channel wise layers. Inputs = batchx64x64x64
     conv = sdn.residual_layer('Conv1', images, 3, K, S=1, phase_train=phase_train) # 64
@@ -37,28 +38,25 @@ def forward_pass_RPN(images, phase_train):
 
     conv = sdn.residual_layer('Conv2a', conv, 3, K * 2, 1, phase_train=phase_train)
     conv = sdn.residual_layer('Conv2b', conv, 3, K * 2, 1, phase_train=phase_train)
-    conv = sdn.inception_layer('Conv2ds', conv, K * 4, S=2, phase_train=phase_train)  # 32
+    conv = sdn.inception_layer('Conv2ds', conv, K * 4, S=2, phase_train=phase_train)  # 16
 
     conv = sdn.residual_layer('Conv3a', conv, 3, K * 4, 1, phase_train=phase_train)
     conv = sdn.residual_layer('Conv3b', conv, 3, K * 4, 1, phase_train=phase_train)
     conv = sdn.residual_layer('Conv3c', conv, 3, K * 4, 1, phase_train=phase_train)
-    conv = sdn.inception_layer('Conv3ds', conv, K * 8, S=2, phase_train=phase_train)  # 16
+    conv = sdn.inception_layer('Conv3ds', conv, K * 8, S=2, phase_train=phase_train)  # 8
 
     conv = sdn.residual_layer('Conv4a', conv, 3, K * 8, 1, phase_train=phase_train)
     conv = sdn.inception_layer('Conv4b', conv, K * 8, S=1, phase_train=phase_train)
     conv = sdn.residual_layer('Conv4c', conv, 3, K * 8, 1, phase_train=phase_train)
-    conv = sdn.inception_layer('Conv4ds', conv, K * 16, S=2, phase_train=phase_train)  # 8
+    conv = sdn.residual_layer('Conv4d', conv, 3, K * 8, 1, phase_train=phase_train)
+    conv = sdn.inception_layer('Conv4es', conv, K * 16, S=2, phase_train=phase_train)  # 4
 
     conv = sdn.residual_layer('Conv5a', conv, 3, K * 16, 1, phase_train=phase_train)
     conv = sdn.inception_layer('Conv5b', conv, K * 16, S=1, phase_train=phase_train)
-    conv = sdn.inception_layer('Conv5c', conv, K * 16, S=1, phase_train=phase_train)
-    conv = sdn.inception_layer('Conv5d', conv, K * 32, S=2, phase_train=phase_train)  # 4
-
-    conv = sdn.residual_layer('Conv6a', conv, 3, K * 32, 1, phase_train=phase_train)
-    conv = sdn.inception_layer('Conv6b', conv, K * 32, S=1, phase_train=phase_train)
-    conv = sdn.residual_layer('Conv6c', conv, 3, K * 32, 1, phase_train=phase_train)
-    conv = sdn.residual_layer('Conv6d', conv, 3, K * 32, 1, phase_train=phase_train)
-    conv = sdn.residual_layer('Conv6e', conv, 3, K * 32, 1, phase_train=phase_train)
+    conv = sdn.residual_layer('Conv5c', conv, 3, K * 16, 1, phase_train=phase_train)
+    conv = sdn.inception_layer('Conv5d', conv, K * 16, S=1, phase_train=phase_train)
+    conv = sdn.residual_layer('Conv5e', conv, 3, K * 16, 1, phase_train=phase_train)
+    conv = sdn.residual_layer('Conv5f', conv, 3, K * 16, 1, phase_train=phase_train)
 
     # TODO: RPN has class logits and BBox logits, need another branch
 
@@ -81,25 +79,27 @@ def total_loss(logits, labels):
 
 
     # Squish
-    labels = tf.squeeze(labels)
+    labels = tf.cast(tf.squeeze(labels), tf.float32)
     logits = tf.squeeze(logits)
 
     # Make an object mask and multiply this mask by scaling factor then add back to labels. Add 1 to prevent 0 loss
-    object_mask = tf.cast(labels[19] >= 0.1, tf.float32)
-    object_mask = tf.add(tf.multiply(object_mask, FLAGS.loss_factor), 1)
+    object_mask = tf.cast(labels[:, 19] >= 0.1, tf.float32)
+    object_mask = tf.add(tf.multiply(object_mask, 1), 1)
 
     # Calculate loss for bounding box only if it's on an object with ROI > 0.05
     # TODO: Apply object mask
-    # if FLAGS.loss_factor != 1.0: loss = tf.multiply(loss, tf.squeeze(lesion_mask))
-    L1_loss, L2_loss = 0, 0
-    for var in range(4):
-        L2_loss += tf.reduce_mean(tf.square(logits[:, var] - labels[:, var]))
-        L1_loss += tf.reduce_mean(tf.abs(logits[:, var] - labels[:, var]))
-    loc_loss = (L1_loss + L2_loss) / 2
+    loc_loss = 0
+
+    # # if FLAGS.loss_factor != 1.0: loss = tf.multiply(loss, tf.squeeze(lesion_mask))
+    # L1_loss, L2_loss = 0, 0
+    # for var in range(4):
+    #     L2_loss += tf.reduce_mean(tf.square(logits[:, var] - labels[:, var]))
+    #     L1_loss += tf.reduce_mean(tf.abs(logits[:, var] - labels[:, var]))
+    # loc_loss = (L1_loss + L2_loss) / 2
 
 
     # Change labels to one hot
-    labels = tf.one_hot(tf.cast(labels[19], tf.uint8), depth=FLAGS.num_classes, dtype=tf.uint8)
+    labels = tf.one_hot(tf.cast(labels[:, 19], tf.uint8), depth=2, dtype=tf.uint8)
 
     # Calculate  loss
     class_loss = tf.nn.softmax_cross_entropy_with_logits_v2(labels=tf.squeeze(labels), logits=logits)
@@ -121,6 +121,77 @@ def total_loss(logits, labels):
     tf.add_to_collection('losses', total_loss)
 
     return total_loss
+
+
+def _find_deltas(boxes, anchors, scale_factors=None):
+    """
+    Generate deltas to transform source offsets into destination anchors
+    :param boxes: BoxList holding N boxes to be encoded.
+    :param anchors: BoxList of anchors.
+    :param: scale_factors: scales location targets when using joint training
+    :return:
+      a tensor representing N anchor-encoded boxes of the format
+      [ty, tx, th, tw].
+    """
+
+    # Convert anchors to the center coordinate representation.
+    ymin, xmin, ymax, xmax = tf.unstack(boxes, axis=1)
+    ymia, xmia, ymaa, xmaa = tf.unstack(anchors, axis=1)
+    cenx = (xmin + xmax) / 2
+    cenxa = cenxa = (xmia + xmaa) / 2
+    ceny = (ymin + ymax) / 2
+    cenya = (ymia + ymaa) / 2
+    w = xmax - xmin
+    h = ymax - ymin
+    wa = xmaa - xmia
+    ha = ymaa - ymia
+
+    # Avoid NaN in division and log below.
+    ha += 1e-8
+    wa += 1e-8
+    h += 1e-8
+    w += 1e-8
+
+    # Calculate the normalized translations required
+    tx = (cenx - cenxa) / wa
+    ty = (ceny - cenya) / ha
+    tw = tf.log(w / wa)
+    th = tf.log(h / ha)
+
+    # Scales location targets as used in paper for joint training.
+    if scale_factors:
+        ty *= scale_factors[0]
+        tx *= scale_factors[1]
+        th *= scale_factors[2]
+        tw *= scale_factors[3]
+
+    return tf.transpose(tf.stack([ty, tx, th, tw]))
+
+
+def _smooth_l1_loss(self, predicted_boxes, gtboxes, object_weights, classes_weights=None):
+
+    """
+    TODO: Calculates the smooth L1 losses
+    :param predicted_boxes: The filtered anchors
+    :param gtboxes:ground truth boxes
+    :param object_weights: The mask map indicating whether this is an object or not
+    :return:
+    """
+
+    diff = predicted_boxes - gtboxes
+    absolute_diff = tf.cast(tf.abs(diff), tf.float32)
+
+    if classes_weights is None:
+
+        anchorwise_smooth_l1norm = tf.reduce_sum(tf.where(tf.less(absolute_diff, 1),0.5 * tf.square(absolute_diff), absolute_diff - 0.5),
+                                                 axis=1) * object_weights
+
+    else:
+
+        anchorwise_smooth_l1norm = tf.reduce_sum(tf.where(tf.less(absolute_diff, 1), 0.5 * tf.square(absolute_diff) * classes_weights,
+                                                          (absolute_diff - 0.5) * classes_weights), axis=1) * object_weights
+
+    return tf.reduce_mean(anchorwise_smooth_l1norm, axis=0)
 
 
 def backward_pass(total_loss):
@@ -176,7 +247,7 @@ def inputs(training=True, skip=False):
     :return:
     """
 
-    if not skip:  Input.pre_proc_localizations(FLAGS.box_dims)
+    if not skip:  Input.pre_proc_localizations(FLAGS.box_dims, thresh=0.4)
 
     else: print('-------------------------Previously saved records found! Loading...')
 

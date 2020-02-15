@@ -31,7 +31,7 @@ sdl = SDL.SODLoader(data_root=home_dir)
 sdd = SDD.SOD_Display()
 
 
-def pre_proc_localizations(box_dims=64, thresh=0.5):
+def pre_proc_localizations(box_dims=64, thresh=0.4):
 
     """
     Pre processes the input for the localization network
@@ -125,11 +125,11 @@ def pre_proc_localizations(box_dims=64, thresh=0.5):
             counter[object_class] += 1
 
             # Append object class and fracture class to box data
-            box_data = np.append(box_data, [object_class, fracture_class]).astype(np.float16)
+            box_data = np.append(box_data, [object_class, fracture_class]).astype(np.float32)
 
             # Save the data to [0ymin, 1xmin, 2ymax, 3xmax, cny, cnx, 6height, 7width, 8origshapey, 9origshapex,
             #    10yamin, 11xamin, 12yamax, 13xamax, 14acny, 15acnx, 16aheight, 17awidth, IOU, obj_class, #_class]
-            data[index] = {'data': anchor_box, 'box_data': box_data, 'group': group, 'view': dst_File, 'accno': accno}
+            data[index] = {'data': anchor_box, 'bbox': box_data, 'group': group, 'view': dst_File, 'accno': accno}
 
             # # TODO: Testing Append to display if positive
             # if index % 2000 == 0 or object_class == 1: display.append(anchor_box.astype(np.float32))
@@ -328,11 +328,10 @@ def load_protobuf(training=True):
     #    10yamin, 11xamin, 12yamax, 13xamax, 14acny, 15acnx, 16aheight, 17awidth, 18IOU, 19obj_class, 20#_class]
 
     # Lambda functions for retreiving our protobuf
-    _parse_labels = lambda dataset: sdl.load_tfrecord_labels(dataset)
-    _parse_images = lambda dataset: sdl.load_tfrecord_images(dataset, [FLAGS.box_dims, FLAGS.box_dims], tf.float16,
-                                                             'bbox_data', tf.float16, [21])
+    _parse_labels = lambda dataset: sdl.load_tfrecord_labels(dataset, 'box_data', tf.float32, [21])
+    _parse_images = lambda dataset: sdl.load_tfrecord_images(dataset, [FLAGS.box_dims, FLAGS.box_dims], tf.float16)
     _parse_all = lambda dataset: sdl.load_tfrecords(dataset, [FLAGS.box_dims, FLAGS.box_dims], tf.float16,
-                                                    'bbox_data', tf.float16, [21])
+                                                    'box_data', tf.float32, [21])
 
     # Load tfrecords with parallel interleave if training
     if training:
@@ -350,13 +349,13 @@ def load_protobuf(training=True):
     if training:
 
         # Define our undersample and oversample filtering functions
-        _filter_fn = lambda x: sdl.undersample_filter(x['bbox_data'][19], actual_dists=[0.997, 0.003], desired_dists=[.9, .1])
+        _filter_fn = lambda x: sdl.undersample_filter(x['box_data'][19], actual_dists=[0.997, 0.003], desired_dists=[.9, .1])
         _undersample_filter = lambda x: dataset.filter(_filter_fn)
         _oversample_filter = lambda x: tf.data.Dataset.from_tensors(x).repeat(
-            sdl.oversample_class(x['bbox_data'][19], actual_dists=[0.33, 0.67], desired_dists=[.9, .1]))
+            sdl.oversample_class(x['box_data'][19], actual_dists=[0.33, 0.67], desired_dists=[.9, .1]))
 
         # Large shuffle, repeat for xx epochs then parse the labels only
-        dataset = dataset.shuffle(buffer_size=FLAGS.epoch_size)
+        dataset = dataset.shuffle(buffer_size=FLAGS.epoch_size//20)
         dataset = dataset.repeat(FLAGS.repeats)
         dataset = dataset.map(_parse_labels, num_parallel_calls=tf.data.experimental.AUTOTUNE)
 
@@ -420,27 +419,52 @@ class DataPreprocessor(object):
             # When flipping, consider that the top left and bottom right corners represent different points now
             ld = record['box_data']
 
-            if mode == 1:
+            if mode == 2:
 
-                # Don't do vertical flip. It doesn't make a ton of sense
-                stacked, img = ld, image
-
-            elif mode == 2:
-
+                # Horizontal flip. Flip both the base bounding box and the generated bounding box
                 img = tf.image.flip_left_right(image) # Horizontal flip
-                # ld1 = (1 - ld[1]) - ld[7] # x=(1-x) - Width to keep top left corner at top left
-                # ld3 = (1 - ld[3]) + ld[7] # x=(1-x) + width to keep bottom right at bottom right
-                # ld5 = 1 - ld[5] # Flip center point X axis
-                # stacked = tf.stack([ld[0], ld1, ld[2], ld3, ld[4], ld5, ld[6], ld[7], ld[8], ld[9]])
-                stacked = ld
+                ld1 = (1 - ld[1]) - ld[7] # x=(1-x) - Width to keep top left corner at top left
+                ld3 = (1 - ld[3]) + ld[7] # x=(1-x) + width to keep bottom right at bottom right
+                ld5 = 1 - ld[5] # Flip center point X axis
+                ld11 = (1 - ld[11]) - ld[17]  # x=(1-x) - Width to keep top left corner at top left
+                ld13 = (1 - ld[13]) + ld[17]  # x=(1-x) + width to keep bottom right at bottom right
+                ld15 = 1 - ld[15]  # Flip center point X axis
+                stacked = tf.stack([ld[0], ld1, ld[2], ld3, ld[4], ld5, ld[6], ld[7], ld[8], ld[9],
+                                    ld[10], ld11, ld[12], ld13, ld[14], ld15, ld[16], ld[17], ld[18], ld[19],
+                                    ld[20]])
 
             else: stacked, img = ld, image
 
             return img, stacked
 
         # Maxval is not included in the range
-        image, record['box_data'] = tf.cond(tf.squeeze(tf.random.uniform([], 0, 2, dtype=tf.int32)) > 0, lambda: flip(1), lambda: flip(0))
         image, record['box_data'] = tf.cond(tf.squeeze(tf.random.uniform([], 0, 2, dtype=tf.int32)) > 0, lambda: flip(2), lambda: flip(0))
+
+        # Change IOU cutoff function
+        def cutoff2(mode=None):
+
+            # When flipping, consider that the top left and bottom right corners represent different points now
+            ld = record['box_data']
+
+            if mode == 2:
+
+                # Horizontal flip. Flip both the base bounding box and the generated bounding box
+                ld19 = 1
+                stacked = tf.stack([ld[0], ld[1], ld[2], ld[3], ld[4], ld[5], ld[6], ld[7], ld[8], ld[9],
+                                    ld[10], ld[11], ld[12], ld[13], ld[14], ld[15], ld[16], ld[17], ld[18], ld19,
+                                    ld[20]])
+
+            else:
+                ld19 = 0
+                stacked = tf.stack([ld[0], ld[1], ld[2], ld[3], ld[4], ld[5], ld[6], ld[7], ld[8], ld[9],
+                                    ld[10], ld[11], ld[12], ld[13], ld[14], ld[15], ld[16], ld[17], ld[18], ld19,
+                                    ld[20]])
+
+            return stacked
+
+        # Change IOU cutoff. Note that we oversampled the tfrecord cutoff, not this one...
+        cutoff = 0.3
+        record['box_data'] = tf.cond(record['box_data'][18] > cutoff, lambda: cutoff2(2), lambda: cutoff2(0))
 
         # Random brightness/contrast
         image = tf.image.random_brightness(image, max_delta=2)
@@ -458,7 +482,7 @@ class DataPreprocessor(object):
         noise = tf.random.uniform(shape=[FLAGS.network_dims, FLAGS.network_dims, 1], minval=-T_noise, maxval=T_noise)
 
         # Add the poisson noise
-        image = tf.add(image, tf.cast(noise, tf.float32))
+        image = tf.add(image, tf.cast(noise, tf.float16))
 
     else: # Validation
 
