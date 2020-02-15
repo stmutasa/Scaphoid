@@ -32,7 +32,7 @@ def forward_pass_RPN(images, phase_train):
     images = tf.expand_dims(images, -1)
     images = tf.cast(images, tf.float32)
 
-    # Channel wise layers. Inputs = batchx64x64x64
+    # Inputs = batchx64x64x64
     conv = sdn.residual_layer('Conv1', images, 3, K, S=1, phase_train=phase_train) # 64
     conv = sdn.inception_layer('Conv1ds', conv, K * 2, S=2, phase_train=phase_train) # 32
 
@@ -51,64 +51,104 @@ def forward_pass_RPN(images, phase_train):
     conv = sdn.residual_layer('Conv4d', conv, 3, K * 8, 1, phase_train=phase_train)
     conv = sdn.inception_layer('Conv4es', conv, K * 16, S=2, phase_train=phase_train)  # 4
 
-    conv = sdn.residual_layer('Conv5a', conv, 3, K * 16, 1, phase_train=phase_train)
-    conv = sdn.inception_layer('Conv5b', conv, K * 16, S=1, phase_train=phase_train)
-    conv = sdn.residual_layer('Conv5c', conv, 3, K * 16, 1, phase_train=phase_train)
-    conv = sdn.inception_layer('Conv5d', conv, K * 16, S=1, phase_train=phase_train)
-    conv = sdn.residual_layer('Conv5e', conv, 3, K * 16, 1, phase_train=phase_train)
-    conv = sdn.residual_layer('Conv5f', conv, 3, K * 16, 1, phase_train=phase_train)
+    # At this point split into classifier and regressor
+    convC = sdn.residual_layer('ConvC1', conv, 3, K * 16, 1, phase_train=phase_train)
+    convC = sdn.residual_layer('ConvC2', convC, 3, K * 16, 1, phase_train=phase_train)
+    linearC = sdn.fc7_layer('FC7c', convC, 8, True, phase_train, FLAGS.dropout_factor, override=3, BN=True)
+    linearC = sdn.linear_layer('LinearC', linearC, 4, True, phase_train, FLAGS.dropout_factor, BN=True)
+    LogitsC = sdn.linear_layer('SoftmaxC', linearC, 2, relu=False, add_bias=False, BN=False)
 
-    # TODO: RPN has class logits and BBox logits, need another branch
+    # Regressor, aka predict how many pixels to move over to get to center
+    convR = sdn.residual_layer('ConvR1', conv, 3, K * 16, 1, phase_train=phase_train)
+    convR = sdn.residual_layer('ConvR2', convR, 3, K * 16, 1, phase_train=phase_train)
+    linearR = sdn.fc7_layer('FC7r', convR, 8, True, phase_train, FLAGS.dropout_factor, override=3, BN=True)
+    LogitsR = sdn.linear_layer('SoftmaxR', linearR, 4, relu=False, add_bias=False, BN=False)
 
-    # Linear layers for center
-    linear = sdn.fc7_layer('FC7', conv, 8, True, phase_train, FLAGS.dropout_factor, override=3, BN=True)
-    linear = sdn.linear_layer('Linear', linear, 4, True, phase_train, FLAGS.dropout_factor, BN=True)
-    Logits = sdn.linear_layer('Softmax', linear, 2, relu=False, add_bias=False, BN=False)
-
-    return Logits
+    # Return logits as a tuple
+    return (LogitsC, LogitsR)
 
 
 def total_loss(logits, labels):
 
     """
     Add loss to the trainable variables and a summary
+    logits is a tuple of Classification logits and regression logits
+    Saved the data to [0ymin, 1xmin, 2ymax, 3xmax, cny, cnx, 6height, 7width, 8origshapey, 9origshapex,
+        10yamin, 11xamin, 12yamax, 13xamax, 14acny, 15acnx, 16aheight, 17awidth, 18IOU, 19obj_class, 20#_class]
     """
 
-    # Saved the data to [0ymin, 1xmin, 2ymax, 3xmax, cny, cnx, 6height, 7width, 8origshapey, 9origshapex,
-    #    10yamin, 11xamin, 12yamax, 13xamax, 14acny, 15acnx, 16aheight, 17awidth, 18IOU, 19obj_class, 20#_class]
-
+    # Loss factors
+    class_factor = 1.0
+    loc_factor = 0.1
 
     # Squish
     labels = tf.cast(tf.squeeze(labels), tf.float32)
-    logits = tf.squeeze(logits)
+    logitsC, logitsR = tf.squeeze(logits[0]), tf.squeeze(logits[1])
 
-    # Make an object mask and multiply this mask by scaling factor then add back to labels. Add 1 to prevent 0 loss
-    object_mask = tf.cast(labels[:, 19] >= 0.1, tf.float32)
-    object_mask = tf.add(tf.multiply(object_mask, 1), 1)
+    """
+    Regression loss, activate only for true anchors and normalize by that number
+    The goal is to learn to predict how many pixels to move over to get to center of the scaphoid and how much to scale the anchor window by
+    So predict the difference between the applied transformation 
+    And the factor to scale the anchor box window by
+    """
 
-    # Calculate loss for bounding box only if it's on an object with ROI > 0.05
-    # TODO: Apply object mask
-    loc_loss = 0
+    # Make an object mask for the localization loss
+    object_mask = tf.cast(labels[:, 19] > 0, tf.float32)
 
-    # # if FLAGS.loss_factor != 1.0: loss = tf.multiply(loss, tf.squeeze(lesion_mask))
-    # L1_loss, L2_loss = 0, 0
-    # for var in range(4):
-    #     L2_loss += tf.reduce_mean(tf.square(logits[:, var] - labels[:, var]))
-    #     L1_loss += tf.reduce_mean(tf.abs(logits[:, var] - labels[:, var]))
-    # loc_loss = (L1_loss + L2_loss) / 2
+    # Calculate localization deltas required to actually shift the box
+    ceny, cenx, h, w = tf.unstack(labels[:, 4:8], axis=1)
+    cenya, cenxa, ha, wa = tf.unstack(labels[:, 14:18], axis=1)
 
+    # Avoid NaN in division and log below.
+    ha += 1e-8
+    wa += 1e-8
+    h += 1e-8
+    w += 1e-8
+
+    # Calculate the normalized translations ACTUALLY required to shift the bbox
+    tx, ty = (cenx - cenxa) / wa, (ceny - cenya) / ha
+    tw, th = tf.log(w / wa), tf.log(h / ha)
+    actual = tf.transpose(tf.stack([ty, tx, th, tw]))
+
+    # Get loss for each translation
+    absolute_diff = tf.cast(tf.abs(logitsR - actual), tf.float32)
+    loc_loss = tf.reduce_sum(tf.where(tf.less(absolute_diff, 1), 0.5 * tf.square(absolute_diff), absolute_diff - 0.5), axis=1) * object_mask
+
+    # Normalize by number of objects included here
+    loc_loss = tf.divide(tf.reduce_sum(loc_loss), tf.reduce_sum(object_mask))*loc_factor
+
+    """
+    Classification loss
+    """
+
+    # Make a weighting mask for object foreground classification loss
+    loss_factor = 5.0
+    class_mask = tf.cast(labels[:, 19] > 0, tf.float32)
+
+    # Now multiply this mask by scaling factor then add back to labels. Add 1 to prevent 0 loss
+    class_mask = tf.add(tf.multiply(class_mask, loss_factor), 1)
 
     # Change labels to one hot
-    labels = tf.one_hot(tf.cast(labels[:, 19], tf.uint8), depth=2, dtype=tf.uint8)
+    labelsC = tf.one_hot(tf.cast(labels[:, 19], tf.uint8), depth=2, dtype=tf.uint8)
 
     # Calculate  loss
-    class_loss = tf.nn.softmax_cross_entropy_with_logits_v2(labels=tf.squeeze(labels), logits=logits)
+    class_loss = tf.nn.softmax_cross_entropy_with_logits_v2(labels=tf.squeeze(labelsC), logits=logitsC)
+
+    # Add in classification mask
+    if loss_factor != 1.0: class_loss = tf.multiply(class_loss, tf.squeeze(class_mask))
 
     # Reduce to scalar
     class_loss = tf.reduce_mean(class_loss)
 
+    # Normalize by minibatch size
+    class_loss = class_factor*tf.divide(class_loss, FLAGS.batch_size)
+
+    """
+    Combine Losses
+    """
+
     # Add losses
-    total_loss = 10*class_loss + loc_loss
+    total_loss = class_loss + loc_loss
 
     # Output the summary of the MSE and MAE
     tf.summary.scalar('Class_Loss', class_loss)
@@ -120,55 +160,10 @@ def total_loss(logits, labels):
     tf.add_to_collection('losses', loc_loss)
     tf.add_to_collection('losses', total_loss)
 
-    return total_loss
+    return total_loss, class_loss, loc_loss
 
 
-def _find_deltas(boxes, anchors, scale_factors=None):
-    """
-    Generate deltas to transform source offsets into destination anchors
-    :param boxes: BoxList holding N boxes to be encoded.
-    :param anchors: BoxList of anchors.
-    :param: scale_factors: scales location targets when using joint training
-    :return:
-      a tensor representing N anchor-encoded boxes of the format
-      [ty, tx, th, tw].
-    """
-
-    # Convert anchors to the center coordinate representation.
-    ymin, xmin, ymax, xmax = tf.unstack(boxes, axis=1)
-    ymia, xmia, ymaa, xmaa = tf.unstack(anchors, axis=1)
-    cenx = (xmin + xmax) / 2
-    cenxa = cenxa = (xmia + xmaa) / 2
-    ceny = (ymin + ymax) / 2
-    cenya = (ymia + ymaa) / 2
-    w = xmax - xmin
-    h = ymax - ymin
-    wa = xmaa - xmia
-    ha = ymaa - ymia
-
-    # Avoid NaN in division and log below.
-    ha += 1e-8
-    wa += 1e-8
-    h += 1e-8
-    w += 1e-8
-
-    # Calculate the normalized translations required
-    tx = (cenx - cenxa) / wa
-    ty = (ceny - cenya) / ha
-    tw = tf.log(w / wa)
-    th = tf.log(h / ha)
-
-    # Scales location targets as used in paper for joint training.
-    if scale_factors:
-        ty *= scale_factors[0]
-        tx *= scale_factors[1]
-        th *= scale_factors[2]
-        tw *= scale_factors[3]
-
-    return tf.transpose(tf.stack([ty, tx, th, tw]))
-
-
-def _smooth_l1_loss(self, predicted_boxes, gtboxes, object_weights, classes_weights=None):
+def _smooth_l1_loss(predicted_boxes, gtboxes, object_weights, classes_weights=None):
 
     """
     TODO: Calculates the smooth L1 losses
@@ -252,3 +247,86 @@ def inputs(training=True, skip=False):
     else: print('-------------------------Previously saved records found! Loading...')
 
     return Input.load_protobuf(training)
+
+
+def _find_deltas(self, boxes, anchors, scale_factors=None):
+
+    """
+    Generate deltas to transform source offsets into destination anchors
+    :param boxes: BoxList holding N boxes to be encoded.
+    :param anchors: BoxList of anchors.
+    :param: scale_factors: scales location targets when using joint training
+    :return:
+      a tensor representing N anchor-encoded boxes of the format
+      [ty, tx, th, tw].
+    """
+
+    # Convert anchors to the center coordinate representation.
+    ymin, xmin, ymax, xmax = tf.unstack(boxes, axis=1)
+    ymia, xmia, ymaa, xmaa = tf.unstack(anchors, axis=1)
+    cenx = (xmin + xmax) / 2
+    cenxa = cenxa = (xmia + xmaa) / 2
+    ceny = (ymin + ymax) / 2
+    cenya = (ymia + ymaa) / 2
+    w = xmax - xmin
+    h = ymax - ymin
+    wa = xmaa - xmia
+    ha = ymaa - ymia
+
+    # Avoid NaN in division and log below.
+    ha += 1e-8
+    wa += 1e-8
+    h += 1e-8
+    w += 1e-8
+
+    # Calculate the normalized translations required
+    tx = (cenx - cenxa) / wa
+    ty = (ceny - cenya) / ha
+    tw = tf.log(w / wa)
+    th = tf.log(h / ha)
+
+    # Scales location targets as used in paper for joint training.
+    if scale_factors:
+        ty *= scale_factors[0]
+        tx *= scale_factors[1]
+        th *= scale_factors[2]
+        tw *= scale_factors[3]
+
+    return tf.transpose(tf.stack([ty, tx, th, tw]))
+
+def _apply_deltas(self, rel_codes, anchors, scale_factors=None):
+
+    """
+    Applies the delta offsets to the anchors to find
+    :param rel_codes: a tensor representing N anchor-encoded boxes.
+    :param anchors: BoxList of anchors.
+    :param scale_factors:
+    :return: boxes: BoxList holding N bounding boxes.
+    """
+
+    # Convert anchors to the center coordinate representation.
+    ymia, xmia, ymaa, xmaa = tf.unstack(anchors, axis=1)
+    cenxa = cenxa = (xmia + xmaa) / 2
+    cenya = (ymia + ymaa) / 2
+    wa = xmaa - xmia
+    ha = ymaa - ymia
+
+    ty, tx, th, tw = tf.unstack(rel_codes, axis=1)
+
+    if scale_factors:
+        ty /= scale_factors[0]
+        tx /= scale_factors[1]
+        th /= scale_factors[2]
+        tw /= scale_factors[3]
+
+    w = tf.exp(tw) * wa
+    h = tf.exp(th) * ha
+    ycenter = ty * ha + cenya
+    xcenter = tx * wa + cenxa
+
+    ymin = ycenter - h / 2.
+    xmin = xcenter - w / 2.
+    ymax = ycenter + h / 2.
+    xmax = xcenter + w / 2.
+
+    return tf.transpose(tf.stack([ymin, xmin, ymax, xmax]))

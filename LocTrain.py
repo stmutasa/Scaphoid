@@ -30,9 +30,9 @@ tf.app.flags.DEFINE_string('net_type', 'RPN', """Network predicting CEN, BBOX or
 
 # Define some of the immutable variables
 tf.app.flags.DEFINE_integer('num_epochs', 100, """Number of epochs to run""")
-tf.app.flags.DEFINE_integer('epoch_size', int(4e7), """How many examples""")
+tf.app.flags.DEFINE_integer('epoch_size', int(1e6), """Realy 7.7 mil studies but make epoch 1 mil""")
 tf.app.flags.DEFINE_integer('print_interval', 1, """How often to print a summary to console during training""")
-tf.app.flags.DEFINE_integer('checkpoint_interval', 5, """How many Epochs to wait before saving a checkpoint""")
+tf.app.flags.DEFINE_float('checkpoint_interval', 7.7, """How many Epochs to wait before saving a checkpoint""")
 tf.app.flags.DEFINE_integer('batch_size', 1024, """Number of images to process in a batch.""")
 
 # Hyperparameters:
@@ -47,7 +47,7 @@ tf.app.flags.DEFINE_float('beta2', 0.999, """ The beta 1 value for the adam opti
 
 # Directory control
 tf.app.flags.DEFINE_string('train_dir', 'training/', """Directory to write event logs and save checkpoint files""")
-tf.app.flags.DEFINE_string('RunInfo', 'RPN1/', """Unique file name for this training run""")
+tf.app.flags.DEFINE_string('RunInfo', 'RPN2/', """Unique file name for this training run""")
 tf.app.flags.DEFINE_integer('GPU', 0, """Which GPU to use""")
 
 def train():
@@ -66,17 +66,17 @@ def train():
         data['data'] = tf.reshape(data['data'], [FLAGS.batch_size, FLAGS.network_dims, FLAGS.network_dims])
 
         # Perform the forward pass:
-        logits = network.forward_pass_RPN(data['data'], phase_train=phase_train)
+        all_logits = network.forward_pass_RPN(data['data'], phase_train=phase_train)
         l2loss = network.sdn.calc_L2_Loss(FLAGS.l2_gamma)
 
-        # Labels
+        # Labels and logits
         labels = data['box_data']
 
         # Calculate loss
-        MSE_Loss = network.total_loss(logits, labels)
+        combined_loss, class_loss, loc_loss = network.total_loss(all_logits, labels)
 
         # Add the L2 regularization loss
-        loss = tf.add(MSE_Loss, l2loss, name='TotalLoss')
+        loss = tf.add(combined_loss, l2loss, name='TotalLoss')
 
         # Update the moving average batch norm ops
         extra_update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
@@ -153,21 +153,25 @@ def train():
                     if i % print_interval == 0:
 
                         # Load some metrics
-                        _lbls, _logs, _MSELoss, _l2loss, _loss, _id = mon_sess.run([
-                            labels, logits, MSE_Loss, l2loss, loss, data['view']], feed_dict={phase_train: True})
+                        _lbls, _logs, _combinedLoss, _clsLoss, _locLoss, _l2loss, _totLoss, _id = mon_sess.run([
+                            labels, all_logits, combined_loss, class_loss, loc_loss, l2loss, loss, data['view']],
+                            feed_dict={phase_train: True})
 
                         # Make losses display in ppt
-                        _loss *= 1e3
-                        _MSELoss *= 1e3
+                        _totLoss *= 1e3
+                        _combinedLoss *= 1e3
                         _l2loss *= 1e3
+                        _clsLoss *= 1e3
+                        _locLoss *= 1e3
 
                         # Get timing stats
                         elapsed = timer / print_interval
                         timer = 0
 
                         # Clip labels
-                        if FLAGS.net_type == 'BBOX': _lbls = _lbls[:, :4]
-                        elif FLAGS.net_type == 'RPN': _lbls = _lbls[:, 19]
+                        _lblsCls = _lbls[:, 19]
+                        _lblsCen = _lbls[:, 4:6]
+                        _lblsCena = _lbls[:, 14:16]
 
                         # use numpy to print only the first sig fig
                         np.set_printoptions(precision=3, suppress=True, linewidth=150)
@@ -180,20 +184,13 @@ def train():
 
                         # Print the data
                         print('-' * 70)
-                        print('\nEpoch %d, L2 Loss: = %.3f (%.1f eg/s), Total Loss: %.3f MSE: %.4f'
-                              % (Epoch, _l2loss, FLAGS.batch_size / elapsed, _loss, _MSELoss))
+                        print('\nEpoch %d, Losses: L2:%.3f, Comb:%.3f, Class:%.3f, Loc:%.3f,  (%.1f eg/s), Total Loss: %.3f '
+                              % (Epoch, _l2loss, _combinedLoss, _clsLoss, _locLoss, FLAGS.batch_size / elapsed, _totLoss))
 
-                        print('*** MSE = %.4f,  Labels/Logits: ***' % _MSELoss)
+                        print('*** Loss = %.4f,  Labels/Logits: ***' % _totLoss)
                         for z in range(10):
-
-                            if FLAGS.net_type == 'BBOX':
-                                this_MAE = np.mean(np.absolute(_logs[z] - _lbls[z]))
-                                print('%s -- %.3f/%.3f, %.3f/%.3f, %.3f/%.3f, %.3f/%.3f for an MAE of %.2f%%'
-                                      % (_id[z], _lbls[z, 0], _logs[z, 0], _lbls[z, 1], _logs[z, 1], _lbls[z, 2],
-                                         _logs[z, 2], _lbls[z, 3], _logs[z, 3], this_MAE * 100))
-
-                            if FLAGS.net_type == 'RPN':
-                                print('%s -- Label: %s, Pred %s' % (_id[z], _lbls[z], _logs[z]))
+                            print('%s -- Class Label: %s, Pred %s' % (_id[z], _lblsCls[z], _logs[0][z]))
+                            print ('Box Cen: %s, Anchor Cen: %s, Predicted norm Change: %s' %(_lblsCen[z], _lblsCena[z], _logs[1][z]))
 
                         # Run a session to retrieve our summaries
                         summary = mon_sess.run(all_summaries, feed_dict={phase_train: True})

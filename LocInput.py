@@ -31,7 +31,7 @@ sdl = SDL.SODLoader(data_root=home_dir)
 sdd = SDD.SOD_Display()
 
 
-def pre_proc_localizations(box_dims=64, thresh=0.4):
+def pre_proc_localizations(box_dims=64, thresh=0.6):
 
     """
     Pre processes the input for the localization network
@@ -43,7 +43,6 @@ def pre_proc_localizations(box_dims=64, thresh=0.4):
 
     # Load the files and randomly shuffle them
     filenames = sdl.retreive_filelist('dcm', True, cleanCR_folder)
-    shuffle(filenames)
     gtboxes = sdl.load_CSV_Dict('filename', 'gtboxes.csv')
 
     # Global variables
@@ -77,8 +76,9 @@ def pre_proc_localizations(box_dims=64, thresh=0.4):
         """
         Generate the anchor boxes here
         Base; [.118, .153] or [129.4, 127.7], Scales: [0.68, 1.0, 1.3], Ratios [0.82, 1.05, 1.275]
+        Feature stride of 16 because that's the stride to get to our feature map size
         """
-        anchors = generate_anchors(image, [129.4, 127.7], 10, ratios=[0.82, 1.05, 1.275], scales=[0.68, 1.0, 1.3])
+        anchors = generate_anchors(image, [129.4, 127.7], 16, ratios=[0.82, 1.05, 1.275], scales=[0.68, 1.0, 1.3])
 
         # Generate a GT box measurement in corner format
         ms = image.shape
@@ -103,6 +103,11 @@ def pre_proc_localizations(box_dims=64, thresh=0.4):
 
             # Remember anchor = [10yamin, 11xamin, 12yamax, 13xamax, 14acny, 15acnx, 16aheight, 17awidth, 18IOU]
             an = an.astype(np.float32)
+
+            # Anchors between IOU of 0.25 and 0.6 do not contribute:
+            if an[8] > 0.25 and an[8] < thresh:
+                del an
+                continue
 
             # Generate a box at this location
             anchor_box, _ = sdl.generate_box(image, an[4:6].astype(np.int16), an[6:8].astype(np.int16), dim3d=False)
@@ -148,18 +153,23 @@ def pre_proc_localizations(box_dims=64, thresh=0.4):
         pt += 1
         del image
 
-        # Save q 15 patients
-        if pt % 60 == 0:
-            if pt < 61: sdl.save_dict_filetypes(data[0])
+        # Save q xx patients
+        saveq = 100
+        if pt % saveq == 0:
             print('\nMade %s (%s) bounding boxes SO FAR from %s patients. %s Positive and %s Negative (%.6f %%)'
                   % (index, index-lap_count, pt, counter[1], counter[0], 100*counter[1]/index))
-            sdl.save_tfrecords(data, 1, file_root=('%s/train/BOX_LOCS%s' %(tfrecords_dir, pt//60)))
             lap_count = index
+
+            if pt < (saveq+5):
+                sdl.save_dict_filetypes(data[0])
+                sdl.save_tfrecords(data, 1, file_root=('%s/test/BOX_LOCS%s' %(tfrecords_dir, pt//saveq)))
+            else: sdl.save_tfrecords(data, 1, file_root=('%s/train/BOX_LOCS%s' %(tfrecords_dir, pt//saveq)))
+
             del data
             data = {}
 
     # Save the data.
-    sdl.save_tfrecords(data, 1, file_root=('%s/test/BOX_LOCSFin' %tfrecords_dir))
+    sdl.save_tfrecords(data, 1, file_root=('%s/train/BOX_LOCSFin' %tfrecords_dir))
 
     # Done with all patients
     print('\nMade %s bounding boxes from %s patients. %s Positive and %s Negative (%s %%)'
@@ -349,12 +359,12 @@ def load_protobuf(training=True):
     # Shuffle and repeat if training phase
     if training:
 
-        # # Define our undersample and oversample filtering functions
-        # _filter_fn = lambda x: sdl.undersample_filter(x['box_data'][19], actual_dists=[0.997, 0.00788], desired_dists=[.9, .1])
-        # _undersample_filter = lambda x: dataset.filter(_filter_fn)
-        # _oversample_filter = lambda x: tf.data.Dataset.from_tensors(x).repeat(
-        #     sdl.oversample_class(x['box_data'][19], actual_dists=[0.33, 0.67], desired_dists=[.9, .1]))
-        #
+        # Define our undersample and oversample filtering functions
+        _filter_fn = lambda x: sdl.undersample_filter(x['box_data'][19], actual_dists=[0.999, 0.001], desired_dists=[.7, .3])
+        _undersample_filter = lambda x: dataset.filter(_filter_fn)
+        _oversample_filter = lambda x: tf.data.Dataset.from_tensors(x).repeat(
+            sdl.oversample_class(x['box_data'][19], actual_dists=[0.999, 0.001], desired_dists=[.7, .3]))
+
         # # Large shuffle, repeat for xx epochs then parse the labels only
         # dataset = dataset.shuffle(buffer_size=FLAGS.epoch_size//20)
         # dataset = dataset.repeat(FLAGS.repeats)
@@ -372,20 +382,31 @@ def load_protobuf(training=True):
         # dataset = dataset.map(_parse_images, num_parallel_calls=tf.data.experimental.AUTOTUNE)
 
         #TODO Testing The above oversample code is not working...
-        dataset = dataset.shuffle(FLAGS.epoch_size//20).repeat(FLAGS.repeats).map(_parse_all, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        # dataset = dataset.shuffle(FLAGS.epoch_size).repeat(FLAGS.repeats).map(_parse_all, num_parallel_calls=tf.data.experimental.AUTOTUNE)
 
-    else:
+        # Large shuffle, repeat for xx epochs then parse the labels only
+        dataset = dataset.shuffle(buffer_size=FLAGS.epoch_size)
+        dataset = dataset.repeat(FLAGS.repeats)
         dataset = dataset.map(_parse_all, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+
+        # Now we have the labels, undersample then oversample.
+        dataset = dataset.map(_undersample_filter, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        dataset = dataset.flat_map(lambda x: x)
+        dataset = dataset.map(_oversample_filter, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        dataset = dataset.flat_map(lambda x: x)
+
+        # Now perform a small shuffle in case we duplicated neighbors, then prefetch before the final map
+        dataset = dataset.shuffle(buffer_size=100)
+
+    else: dataset = dataset.map(_parse_all, num_parallel_calls=tf.data.experimental.AUTOTUNE)
 
     scope = 'data_augmentation' if training else 'input'
     with tf.name_scope(scope):
         dataset = dataset.map(DataPreprocessor(training), num_parallel_calls=tf.data.experimental.AUTOTUNE)
 
     # Batch and prefetch
-    if training:
-        dataset = dataset.batch(FLAGS.batch_size, drop_remainder=True).prefetch(tf.data.experimental.AUTOTUNE)
-    else:
-        dataset = dataset.batch(FLAGS.batch_size)
+    if training: dataset = dataset.batch(FLAGS.batch_size, drop_remainder=True).prefetch(tf.data.experimental.AUTOTUNE)
+    else: dataset = dataset.batch(FLAGS.batch_size)
 
     # Make an initializable iterator
     iterator = dataset.make_initializable_iterator()
@@ -466,9 +487,9 @@ class DataPreprocessor(object):
 
             return stacked
 
-        # Change IOU cutoff. Note that we oversampled the tfrecord cutoff, not this one...
-        cutoff = 0.3
-        record['box_data'] = tf.cond(record['box_data'][18] > cutoff, lambda: cutoff2(2), lambda: cutoff2(0))
+        # # Change IOU cutoff. Note that we oversampled the tfrecord cutoff, not this one...
+        # cutoff = 0.3
+        # record['box_data'] = tf.cond(record['box_data'][18] > cutoff, lambda: cutoff2(2), lambda: cutoff2(0))
 
         # Random brightness/contrast
         image = tf.image.random_brightness(image, max_delta=2)
@@ -500,4 +521,4 @@ class DataPreprocessor(object):
     return record
 
 
-#pre_proc_localizations(64)
+#pre_proc_localizations(64, thresh=0.6)

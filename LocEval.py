@@ -25,7 +25,7 @@ tf.app.flags.DEFINE_string('data_dir', 'data/test/', """Path to the data directo
 tf.app.flags.DEFINE_string('training_dir', 'training/', """Path to the training directory.""")
 tf.app.flags.DEFINE_integer('box_dims', 1024, """dimensions to save files""")
 tf.app.flags.DEFINE_integer('network_dims', 512, """dimensions of the network input""")
-tf.app.flags.DEFINE_integer('epoch_size', 200, """How many examples""")
+tf.app.flags.DEFINE_integer('epoch_size', 2449062, """How many examples""")
 tf.app.flags.DEFINE_integer('batch_size', 200, """Number of images to process in a batch.""")
 
 # Hyperparameters:
