@@ -108,7 +108,7 @@ def pre_proc_localizations(box_dims=64, thresh=0.4):
             anchor_box, _ = sdl.generate_box(image, an[4:6].astype(np.int16), an[6:8].astype(np.int16), dim3d=False)
 
             # Reshape the box to a standard dimension: 128x128
-            anchor_box = sdl.zoom_2D(anchor_box, [box_dims, box_dims]).astype(np.float32)
+            anchor_box = sdl.zoom_2D(anchor_box, [box_dims, box_dims]).astype(np.float16)
 
             # Norm the anchor box dimensions
             anchor = [
@@ -125,7 +125,7 @@ def pre_proc_localizations(box_dims=64, thresh=0.4):
             counter[object_class] += 1
 
             # Append object class and fracture class to box data
-            box_data = np.append(box_data, [object_class, fracture_class]).astype(np.float16)
+            box_data = np.append(box_data, [object_class, fracture_class]).astype(np.float32)
 
             # Save the data to [0ymin, 1xmin, 2ymax, 3xmax, cny, cnx, 6height, 7width, 8origshapey, 9origshapex,
             #    10yamin, 11xamin, 12yamax, 13xamax, 14acny, 15acnx, 16aheight, 17awidth, IOU, obj_class, #_class]
@@ -149,17 +149,17 @@ def pre_proc_localizations(box_dims=64, thresh=0.4):
         del image
 
         # Save q 15 patients
-        if pt % 55 == 0:
-            if pt < 60: sdl.save_dict_filetypes(data[0])
+        if pt % 60 == 0:
+            if pt < 61: sdl.save_dict_filetypes(data[0])
             print('\nMade %s (%s) bounding boxes SO FAR from %s patients. %s Positive and %s Negative (%.6f %%)'
                   % (index, index-lap_count, pt, counter[1], counter[0], 100*counter[1]/index))
-            sdl.save_tfrecords(data, 1, file_root=('%s/BOX_LOCS%s' %(tfrecords_dir, pt//55)))
+            sdl.save_tfrecords(data, 1, file_root=('%s/train/BOX_LOCS%s' %(tfrecords_dir, pt//60)))
             lap_count = index
             del data
             data = {}
 
     # Save the data.
-    sdl.save_tfrecords(data, 1, file_root=('%s/BOX_LOCSFin' %tfrecords_dir))
+    sdl.save_tfrecords(data, 1, file_root=('%s/test/BOX_LOCSFin' %tfrecords_dir))
 
     # Done with all patients
     print('\nMade %s bounding boxes from %s patients. %s Positive and %s Negative (%s %%)'

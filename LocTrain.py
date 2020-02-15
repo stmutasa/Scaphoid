@@ -193,7 +193,7 @@ def train():
                                          _logs[z, 2], _lbls[z, 3], _logs[z, 3], this_MAE * 100))
 
                             if FLAGS.net_type == 'RPN':
-                                print('%s -- Label: %s, Pred %s' % (_id[z], _lbls[z], _logs[z, 0]))
+                                print('%s -- Label: %s, Pred %s' % (_id[z], _lbls[z], _logs[z]))
 
                         # Run a session to retrieve our summaries
                         summary = mon_sess.run(all_summaries, feed_dict={phase_train: True})
