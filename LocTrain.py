@@ -33,7 +33,7 @@ tf.app.flags.DEFINE_integer('num_epochs', 100, """Number of epochs to run""")
 tf.app.flags.DEFINE_integer('epoch_size', int(4e7), """How many examples""")
 tf.app.flags.DEFINE_integer('print_interval', 1, """How often to print a summary to console during training""")
 tf.app.flags.DEFINE_integer('checkpoint_interval', 5, """How many Epochs to wait before saving a checkpoint""")
-tf.app.flags.DEFINE_integer('batch_size', 2048, """Number of images to process in a batch.""")
+tf.app.flags.DEFINE_integer('batch_size', 1024, """Number of images to process in a batch.""")
 
 # Hyperparameters:
 tf.app.flags.DEFINE_float('dropout_factor', 0.75, """ Keep probability""")
@@ -47,7 +47,7 @@ tf.app.flags.DEFINE_float('beta2', 0.999, """ The beta 1 value for the adam opti
 
 # Directory control
 tf.app.flags.DEFINE_string('train_dir', 'training/', """Directory to write event logs and save checkpoint files""")
-tf.app.flags.DEFINE_string('RunInfo', 'Center/', """Unique file name for this training run""")
+tf.app.flags.DEFINE_string('RunInfo', 'RPN1/', """Unique file name for this training run""")
 tf.app.flags.DEFINE_integer('GPU', 0, """Which GPU to use""")
 
 def train():
@@ -167,13 +167,16 @@ def train():
 
                         # Clip labels
                         if FLAGS.net_type == 'BBOX': _lbls = _lbls[:, :4]
-                        elif FLAGS.net_type == 'CEN': _lbls = _lbls[:, 4:6]
+                        elif FLAGS.net_type == 'RPN': _lbls = _lbls[:, 19]
 
                         # use numpy to print only the first sig fig
                         np.set_printoptions(precision=3, suppress=True, linewidth=150)
 
                         # Calc epoch
                         Epoch = int((i * FLAGS.batch_size) / FLAGS.epoch_size)
+
+                        # Saved the data to [0ymin, 1xmin, 2ymax, 3xmax, cny, cnx, 6height, 7width, 8origshapey, 9origshapex,
+                        #    10yamin, 11xamin, 12yamax, 13xamax, 14acny, 15acnx, 16aheight, 17awidth, 18IOU, 19obj_class, 20#_class]
 
                         # Print the data
                         print('-' * 70)
@@ -182,16 +185,15 @@ def train():
 
                         print('*** MSE = %.4f,  Labels/Logits: ***' % _MSELoss)
                         for z in range(10):
-                            this_MAE = np.mean(np.absolute(_logs[z] - _lbls[z]))
 
                             if FLAGS.net_type == 'BBOX':
+                                this_MAE = np.mean(np.absolute(_logs[z] - _lbls[z]))
                                 print('%s -- %.3f/%.3f, %.3f/%.3f, %.3f/%.3f, %.3f/%.3f for an MAE of %.2f%%'
                                       % (_id[z], _lbls[z, 0], _logs[z, 0], _lbls[z, 1], _logs[z, 1], _lbls[z, 2],
                                          _logs[z, 2], _lbls[z, 3], _logs[z, 3], this_MAE * 100))
 
-                            if FLAGS.net_type == 'CEN':
-                                print('%s -- %.3f/%.3f, %.3f/%.3f, for an MAE of %.2f%%'
-                                      % (_id[z], _lbls[z, 0], _logs[z, 0], _lbls[z, 1], _logs[z, 1], this_MAE * 100))
+                            if FLAGS.net_type == 'RPN':
+                                print('%s -- Label: %s, Pred %s' % (_id[z], _lbls[z], _logs[z, 0]))
 
                         # Run a session to retrieve our summaries
                         summary = mon_sess.run(all_summaries, feed_dict={phase_train: True})

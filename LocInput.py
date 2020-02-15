@@ -108,7 +108,7 @@ def pre_proc_localizations(box_dims=64, thresh=0.4):
             anchor_box, _ = sdl.generate_box(image, an[4:6].astype(np.int16), an[6:8].astype(np.int16), dim3d=False)
 
             # Reshape the box to a standard dimension: 128x128
-            anchor_box = sdl.zoom_2D(anchor_box, [box_dims, box_dims]).astype(np.float16)
+            anchor_box = sdl.zoom_2D(anchor_box, [box_dims, box_dims]).astype(np.float32)
 
             # Norm the anchor box dimensions
             anchor = [
@@ -125,35 +125,36 @@ def pre_proc_localizations(box_dims=64, thresh=0.4):
             counter[object_class] += 1
 
             # Append object class and fracture class to box data
-            box_data = np.append(box_data, [object_class, fracture_class]).astype(np.float32)
+            box_data = np.append(box_data, [object_class, fracture_class]).astype(np.float16)
 
             # Save the data to [0ymin, 1xmin, 2ymax, 3xmax, cny, cnx, 6height, 7width, 8origshapey, 9origshapex,
             #    10yamin, 11xamin, 12yamax, 13xamax, 14acny, 15acnx, 16aheight, 17awidth, IOU, obj_class, #_class]
-            data[index] = {'data': anchor_box, 'bbox': box_data, 'group': group, 'view': dst_File, 'accno': accno}
-
-            # # TODO: Testing Append to display if positive
-            # if index % 2000 == 0 or object_class == 1: display.append(anchor_box.astype(np.float32))
+            data[index] = {'data': anchor_box, 'box_data': box_data, 'group': group, 'view': dst_File, 'accno': accno}
 
             # Increment box count
             index += 1
-            del anchor_box, an, box_data
 
-        # # TODO: Test, display the box
-        # sdd.display_volume(display, True)
+            # Save copy if this one is positive
+            if object_class == 1:
+                box_data[14] +=1
+                box_data[10] += 1
+                data[index] = {'data': anchor_box, 'box_data': box_data, 'group': group, 'view': dst_File, 'accno': accno}
+                index += 1
+
+            # Garbage
+            del anchor_box, an, box_data
 
         # Increment patient counters
         pt += 1
-        # print ('Patient %s: %s, Boxes: %s Shape: %s Max IOU: %.3f'
-        #        %(index, dst_File, index-lap_count, image.shape, np.max(IOUs)))
-        lap_count = index
         del image
 
         # Save q 15 patients
         if pt % 55 == 0:
-            if pt < 55: sdl.save_dict_filetypes(data[0])
-            print('\nMade %s bounding boxes SO FAR from %s patients. %s Positive and %s Negative (%.6f %%)'
-                  % (index, pt, counter[1], counter[0], 100*counter[1]/index))
+            if pt < 60: sdl.save_dict_filetypes(data[0])
+            print('\nMade %s (%s) bounding boxes SO FAR from %s patients. %s Positive and %s Negative (%.6f %%)'
+                  % (index, index-lap_count, pt, counter[1], counter[0], 100*counter[1]/index))
             sdl.save_tfrecords(data, 1, file_root=('%s/BOX_LOCS%s' %(tfrecords_dir, pt//55)))
+            lap_count = index
             del data
             data = {}
 
@@ -324,11 +325,11 @@ def load_protobuf(training=True):
     -> Prefetch -> Oversample Map -> Flat Map -> Small shuffle -> Prefetch -> Parse images -> Augment -> Prefetch -> Batch
     """
 
-    # Save the data to [0ymin, 1xmin, 2ymax, 3xmax, cny, cnx, 6height, 7width, 8origshapey, 9origshapex,
+    # Saved the data to [0ymin, 1xmin, 2ymax, 3xmax, cny, cnx, 6height, 7width, 8origshapey, 9origshapex,
     #    10yamin, 11xamin, 12yamax, 13xamax, 14acny, 15acnx, 16aheight, 17awidth, 18IOU, 19obj_class, 20#_class]
 
     # Lambda functions for retreiving our protobuf
-    _parse_labels = lambda dataset: sdl.load_tfrecord_labels(dataset, 'box_data', tf.float32, [21])
+    _parse_labels = lambda dataset: sdl.load_tfrecord_labels(dataset, 'box_data', tf.float16, [21])
     _parse_images = lambda dataset: sdl.load_tfrecord_images(dataset, [FLAGS.box_dims, FLAGS.box_dims], tf.float16)
     _parse_all = lambda dataset: sdl.load_tfrecords(dataset, [FLAGS.box_dims, FLAGS.box_dims], tf.float16,
                                                     'box_data', tf.float32, [21])
@@ -348,27 +349,30 @@ def load_protobuf(training=True):
     # Shuffle and repeat if training phase
     if training:
 
-        # Define our undersample and oversample filtering functions
-        _filter_fn = lambda x: sdl.undersample_filter(x['box_data'][19], actual_dists=[0.997, 0.003], desired_dists=[.9, .1])
-        _undersample_filter = lambda x: dataset.filter(_filter_fn)
-        _oversample_filter = lambda x: tf.data.Dataset.from_tensors(x).repeat(
-            sdl.oversample_class(x['box_data'][19], actual_dists=[0.33, 0.67], desired_dists=[.9, .1]))
+        # # Define our undersample and oversample filtering functions
+        # _filter_fn = lambda x: sdl.undersample_filter(x['box_data'][19], actual_dists=[0.997, 0.00788], desired_dists=[.9, .1])
+        # _undersample_filter = lambda x: dataset.filter(_filter_fn)
+        # _oversample_filter = lambda x: tf.data.Dataset.from_tensors(x).repeat(
+        #     sdl.oversample_class(x['box_data'][19], actual_dists=[0.33, 0.67], desired_dists=[.9, .1]))
+        #
+        # # Large shuffle, repeat for xx epochs then parse the labels only
+        # dataset = dataset.shuffle(buffer_size=FLAGS.epoch_size//20)
+        # dataset = dataset.repeat(FLAGS.repeats)
+        # dataset = dataset.map(_parse_labels, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        #
+        # # Now we have the labels, undersample then oversample.
+        # # Map allows us to do it in parallel and flat_map's identity function merges the survivors
+        # dataset = dataset.map(_undersample_filter, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        # dataset = dataset.flat_map(lambda x: x)
+        # dataset = dataset.map(_oversample_filter, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        # dataset = dataset.flat_map(lambda x: x)
+        #
+        # # Now perform a small shuffle in case we duplicated neighbors, then prefetch before the final map
+        # dataset = dataset.shuffle(buffer_size=100)
+        # dataset = dataset.map(_parse_images, num_parallel_calls=tf.data.experimental.AUTOTUNE)
 
-        # Large shuffle, repeat for xx epochs then parse the labels only
-        dataset = dataset.shuffle(buffer_size=FLAGS.epoch_size//20)
-        dataset = dataset.repeat(FLAGS.repeats)
-        dataset = dataset.map(_parse_labels, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-
-        # Now we have the labels, undersample then oversample.
-        # Map allows us to do it in parallel and flat_map's identity function merges the survivors
-        dataset = dataset.map(_undersample_filter, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-        dataset = dataset.flat_map(lambda x: x)
-        dataset = dataset.map(_oversample_filter, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-        dataset = dataset.flat_map(lambda x: x)
-
-        # Now perform a small shuffle in case we duplicated neighbors, then prefetch before the final map
-        dataset = dataset.shuffle(buffer_size=100)
-        dataset = dataset.map(_parse_images, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        #TODO Testing The above oversample code is not working...
+        dataset = dataset.shuffle(FLAGS.epoch_size//20).repeat(FLAGS.repeats).map(_parse_all, num_parallel_calls=tf.data.experimental.AUTOTUNE)
 
     else:
         dataset = dataset.map(_parse_all, num_parallel_calls=tf.data.experimental.AUTOTUNE)
