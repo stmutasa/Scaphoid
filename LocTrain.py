@@ -9,6 +9,7 @@ import LocModel as network
 import numpy as np
 import tensorflow as tf
 import SODLoader as SDL
+from LocInput import sdd as sdd
 
 # Define the data directory to use
 home_dir = '/home/stmutasa/Code/Datasets/Scaphoid/'
@@ -31,7 +32,7 @@ tf.app.flags.DEFINE_string('net_type', 'RPN', """Network predicting CEN, BBOX or
 # Define some of the immutable variables
 tf.app.flags.DEFINE_integer('num_epochs', 100, """Number of epochs to run""")
 tf.app.flags.DEFINE_integer('epoch_size', int(1e6), """Realy 7.7 mil studies but make epoch 1 mil""")
-tf.app.flags.DEFINE_integer('print_interval', 1, """How often to print a summary to console during training""")
+tf.app.flags.DEFINE_integer('print_interval', 7, """How often to print a summary to console during training""")
 tf.app.flags.DEFINE_float('checkpoint_interval', 7.7, """How many Epochs to wait before saving a checkpoint""")
 tf.app.flags.DEFINE_integer('batch_size', 1024, """Number of images to process in a batch.""")
 
@@ -41,14 +42,19 @@ tf.app.flags.DEFINE_float('l2_gamma', 1e-3, """ The gamma value for regularizati
 tf.app.flags.DEFINE_float('moving_avg_decay', 0.999, """ The decay rate for the moving average tracker""")
 
 # Hyperparameters to control the optimizer
-tf.app.flags.DEFINE_float('learning_rate',1e-3, """Initial learning rate""")
+tf.app.flags.DEFINE_float('learning_rate',5e-4, """Initial learning rate""")
 tf.app.flags.DEFINE_float('beta1', 0.9, """ The beta 1 value for the adam optimizer""")
 tf.app.flags.DEFINE_float('beta2', 0.999, """ The beta 1 value for the adam optimizer""")
 
 # Directory control
 tf.app.flags.DEFINE_string('train_dir', 'training/', """Directory to write event logs and save checkpoint files""")
-tf.app.flags.DEFINE_string('RunInfo', 'RPN2/', """Unique file name for this training run""")
+tf.app.flags.DEFINE_string('RunInfo', 'RPN1/', """Unique file name for this training run""")
 tf.app.flags.DEFINE_integer('GPU', 0, """Which GPU to use""")
+
+"""
+GPU 0: RPN1 LR 5e-4
+GPU 1: RPN2 LR 1e-4
+"""
 
 def train():
 
@@ -160,9 +166,12 @@ def train():
                         # Make losses display in ppt
                         _totLoss *= 1e3
                         _combinedLoss *= 1e3
-                        _l2loss *= 1e3
+                        _l2loss *= 1e3 * FLAGS.l2_gamma
                         _clsLoss *= 1e3
                         _locLoss *= 1e3
+
+                        # Positive count
+                        pct = np.sum(_lbls[:, 19])
 
                         # Get timing stats
                         elapsed = timer / print_interval
@@ -187,9 +196,9 @@ def train():
                         print('\nEpoch %d, Losses: L2:%.3f, Comb:%.3f, Class:%.3f, Loc:%.3f,  (%.1f eg/s), Total Loss: %.3f '
                               % (Epoch, _l2loss, _combinedLoss, _clsLoss, _locLoss, FLAGS.batch_size / elapsed, _totLoss))
 
-                        print('*** Loss = %.4f,  Labels/Logits: ***' % _totLoss)
+                        print('*** Pos in Batch %s of %s,  Labels/Logits: ***' % (pct, FLAGS.batch_size))
                         for z in range(10):
-                            print('%s -- Class Label: %s, Pred %s' % (_id[z], _lblsCls[z], _logs[0][z]))
+                            print('%s -- Class Label: %s, Pred %s' % (_id[z], _lblsCls[z], np.argmax(_logs[0][z])), end=' ')
                             print ('Box Cen: %s, Anchor Cen: %s, Predicted norm Change: %s' %(_lblsCen[z], _lblsCena[z], _logs[1][z]))
 
                         # Run a session to retrieve our summaries
@@ -197,6 +206,9 @@ def train():
 
                         # Add the summaries to the protobuf for Tensorboard
                         summary_writer.add_summary(summary, i)
+
+                        # Garbage cleanup
+                        del _lbls, _logs, _combinedLoss, _clsLoss, _locLoss, _l2loss, _totLoss, _id
 
                     if i % checkpoint_interval == 0:
 

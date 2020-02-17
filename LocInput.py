@@ -339,8 +339,6 @@ def load_protobuf(training=True):
     #    10yamin, 11xamin, 12yamax, 13xamax, 14acny, 15acnx, 16aheight, 17awidth, 18IOU, 19obj_class, 20#_class]
 
     # Lambda functions for retreiving our protobuf
-    _parse_labels = lambda dataset: sdl.load_tfrecord_labels(dataset, 'box_data', tf.float16, [21])
-    _parse_images = lambda dataset: sdl.load_tfrecord_images(dataset, [FLAGS.box_dims, FLAGS.box_dims], tf.float16)
     _parse_all = lambda dataset: sdl.load_tfrecords(dataset, [FLAGS.box_dims, FLAGS.box_dims], tf.float16,
                                                     'box_data', tf.float32, [21])
 
@@ -365,27 +363,8 @@ def load_protobuf(training=True):
         _oversample_filter = lambda x: tf.data.Dataset.from_tensors(x).repeat(
             sdl.oversample_class(x['box_data'][19], actual_dists=[0.999, 0.001], desired_dists=[.7, .3]))
 
-        # # Large shuffle, repeat for xx epochs then parse the labels only
-        # dataset = dataset.shuffle(buffer_size=FLAGS.epoch_size//20)
-        # dataset = dataset.repeat(FLAGS.repeats)
-        # dataset = dataset.map(_parse_labels, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-        #
-        # # Now we have the labels, undersample then oversample.
-        # # Map allows us to do it in parallel and flat_map's identity function merges the survivors
-        # dataset = dataset.map(_undersample_filter, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-        # dataset = dataset.flat_map(lambda x: x)
-        # dataset = dataset.map(_oversample_filter, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-        # dataset = dataset.flat_map(lambda x: x)
-        #
-        # # Now perform a small shuffle in case we duplicated neighbors, then prefetch before the final map
-        # dataset = dataset.shuffle(buffer_size=100)
-        # dataset = dataset.map(_parse_images, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-
-        #TODO Testing The above oversample code is not working...
-        # dataset = dataset.shuffle(FLAGS.epoch_size).repeat(FLAGS.repeats).map(_parse_all, num_parallel_calls=tf.data.experimental.AUTOTUNE)
-
         # Large shuffle, repeat for xx epochs then parse the labels only
-        dataset = dataset.shuffle(buffer_size=FLAGS.epoch_size)
+        dataset = dataset.shuffle(buffer_size=FLAGS.epoch_size//2)
         dataset = dataset.repeat(FLAGS.repeats)
         dataset = dataset.map(_parse_all, num_parallel_calls=tf.data.experimental.AUTOTUNE)
 
@@ -396,7 +375,7 @@ def load_protobuf(training=True):
         dataset = dataset.flat_map(lambda x: x)
 
         # Now perform a small shuffle in case we duplicated neighbors, then prefetch before the final map
-        dataset = dataset.shuffle(buffer_size=100)
+        dataset = dataset.shuffle(buffer_size=256)
 
     else: dataset = dataset.map(_parse_all, num_parallel_calls=tf.data.experimental.AUTOTUNE)
 
@@ -437,6 +416,9 @@ class DataPreprocessor(object):
         # Resize to network size
         image = tf.expand_dims(image, -1)
         image = tf.image.resize_images(image, [FLAGS.network_dims, FLAGS.network_dims], tf.compat.v1.image.ResizeMethod.BICUBIC)
+
+        # Normalize the image
+        #image = tf.image.per_image_standardization(image)
 
         # Randomly flip
         def flip(mode=None):
@@ -495,11 +477,6 @@ class DataPreprocessor(object):
         image = tf.image.random_brightness(image, max_delta=2)
         image = tf.image.random_contrast(image, lower=0.995, upper=1.005)
 
-        # # Randomly jiggle locations by up to 1.5% of image dims
-        # rn, lr = [], record['box_data']
-        # for z in range(6): rn.append(tf.random.uniform([], minval=-0.015, maxval=0.015, dtype=tf.float32))
-        # record['box_data'] = tf.stack([lr[0]+rn[0], lr[1]+rn[1], lr[2]+rn[2], lr[3]+rn[3], lr[4]+rn[4], lr[5]+rn[5], lr[6], lr[7], lr[8], lr[9]])
-
         # For noise, first randomly determine how 'noisy' this study will be
         T_noise = tf.random.uniform([], 0, 0.02)
 
@@ -510,6 +487,9 @@ class DataPreprocessor(object):
         image = tf.add(image, tf.cast(noise, tf.float16))
 
     else: # Validation
+
+        # Normalize the image
+        #image = tf.image.per_image_standardization(image)
 
         # Resize to network size
         image = tf.expand_dims(image, -1)
