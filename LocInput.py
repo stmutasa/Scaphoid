@@ -417,9 +417,6 @@ class DataPreprocessor(object):
         image = tf.expand_dims(image, -1)
         image = tf.image.resize_images(image, [FLAGS.network_dims, FLAGS.network_dims], tf.compat.v1.image.ResizeMethod.BICUBIC)
 
-        # Normalize the image
-        #image = tf.image.per_image_standardization(image)
-
         # Randomly flip
         def flip(mode=None):
 
@@ -483,8 +480,12 @@ class DataPreprocessor(object):
         # Create a poisson noise array
         noise = tf.random.uniform(shape=[FLAGS.network_dims, FLAGS.network_dims, 1], minval=-T_noise, maxval=T_noise)
 
+        # Normalize the image
+        image = tf.image.per_image_standardization(image)
+
         # Add the poisson noise
-        image = tf.add(image, tf.cast(noise, tf.float16))
+        # image = tf.add(image, tf.cast(noise, tf.float16))
+        image = tf.add(image, noise)
 
     else: # Validation
 

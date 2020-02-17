@@ -50,10 +50,12 @@ def forward_pass_RPN(images, phase_train):
     conv = sdn.residual_layer('Conv4c', conv, 3, K * 8, 1, phase_train=phase_train)
     conv = sdn.residual_layer('Conv4d', conv, 3, K * 8, 1, phase_train=phase_train)
     conv = sdn.residual_layer('Conv4e', conv, 3, K * 8, 1, phase_train=phase_train)
-    conv = sdn.inception_layer('Conv4es', conv, K * 16, S=2, phase_train=phase_train)  # 4
+    conv = sdn.residual_layer('Conv4f', conv, 3, K * 8, 1, phase_train=phase_train)
+    conv = sdn.residual_layer('Conv4g', conv, 3, K * 8, 1, phase_train=phase_train)
+    conv = sdn.residual_layer('Conv4h', conv, 3, K * 8, 1, phase_train=phase_train)
 
     # At this point split into classifier and regressor
-    convC = sdn.residual_layer('ConvC1', conv, 3, K * 16, 1, phase_train=phase_train)
+    convC = sdn.inception_layer('ConvC1', conv, K * 16, S=2, phase_train=phase_train)  # 4
     convC = sdn.residual_layer('ConvC2', convC, 3, K * 16, 1, phase_train=phase_train)
     convC = sdn.residual_layer('ConvC3', convC, 3, K * 16, 1, phase_train=phase_train)
     convC = sdn.residual_layer('ConvC4', convC, 3, K * 16, 1, phase_train=phase_train)
@@ -61,16 +63,18 @@ def forward_pass_RPN(images, phase_train):
     linearC = sdn.linear_layer('LinearC', linearC, 4, True, phase_train, FLAGS.dropout_factor, BN=True)
     LogitsC = sdn.linear_layer('SoftmaxC', linearC, 2, relu=False, add_bias=False, BN=False)
 
-    # Regressor, aka predict how many pixels to move over to get to center
-    convR = sdn.residual_layer('ConvR1', conv, 3, K * 16, 1, phase_train=phase_train)
-    convR = sdn.residual_layer('ConvR2', convR, 3, K * 16, 1, phase_train=phase_train)
-    convR = sdn.residual_layer('ConvR3', convR, 3, K * 16, 1, phase_train=phase_train)
-    convR = sdn.residual_layer('ConvR4', convR, 3, K * 16, 1, phase_train=phase_train)
-    linearR = sdn.fc7_layer('FC7r', convR, 8, True, phase_train, FLAGS.dropout_factor, override=3, BN=True)
-    LogitsR = sdn.linear_layer('SoftmaxR', linearR, 4, relu=False, add_bias=False, BN=False)
+    if FLAGS.net_type == 'RPN':
+        # Regressor, aka predict how many pixels to move over to get to center
+        convR = sdn.inception_layer('ConvR1', conv, K * 16, S=2, phase_train=phase_train)  # 4
+        convR = sdn.residual_layer('ConvR2', convR, 3, K * 16, 1, phase_train=phase_train)
+        convR = sdn.residual_layer('ConvR3', convR, 3, K * 16, 1, phase_train=phase_train)
+        convR = sdn.residual_layer('ConvR4', convR, 3, K * 16, 1, phase_train=phase_train)
+        linearR = sdn.fc7_layer('FC7r', convR, 8, True, phase_train, FLAGS.dropout_factor, override=3, BN=True)
+        LogitsR = sdn.linear_layer('SoftmaxR', linearR, 4, relu=False, add_bias=False, BN=False)
 
     # Return logits as a tuple
-    return (LogitsC, LogitsR)
+    if FLAGS.net_type == 'RPN': return (LogitsC, LogitsR)
+    else: return (LogitsC, LogitsC)
 
 
 def total_loss(logits, labels):
@@ -89,7 +93,7 @@ def total_loss(logits, labels):
 
     # Squish
     labels = tf.cast(tf.squeeze(labels), tf.float32)
-    logitsC, logitsR = tf.squeeze(logits[0]), tf.squeeze(logits[1])
+    logitsC = tf.squeeze(logits[0])
 
     """
     Regression loss, activate only for true anchors and normalize by that number
@@ -98,30 +102,34 @@ def total_loss(logits, labels):
     And the factor to scale the anchor box window by
     """
 
-    # Make an object mask for the localization loss
-    object_mask = tf.cast(labels[:, 19] > 0, tf.float32)
+    if FLAGS.net_type == 'RPN':
 
-    # Calculate localization deltas required to actually shift the box
-    ceny, cenx, h, w = tf.unstack(labels[:, 4:8], axis=1)
-    cenya, cenxa, ha, wa = tf.unstack(labels[:, 14:18], axis=1)
+        logitsR = tf.squeeze(logits[1])
 
-    # Avoid NaN in division and log below.
-    ha += 1e-8
-    wa += 1e-8
-    h += 1e-8
-    w += 1e-8
+        # Make an object mask for the localization loss
+        object_mask = tf.cast(labels[:, 19] > 0, tf.float32)
 
-    # Calculate the normalized translations ACTUALLY required to shift the bbox
-    tx, ty = (cenx - cenxa) / wa, (ceny - cenya) / ha
-    tw, th = tf.log(w / wa), tf.log(h / ha)
-    actual = tf.transpose(tf.stack([ty, tx, th, tw]))
+        # Calculate localization deltas required to actually shift the box
+        ceny, cenx, h, w = tf.unstack(labels[:, 4:8], axis=1)
+        cenya, cenxa, ha, wa = tf.unstack(labels[:, 14:18], axis=1)
 
-    # Get loss for each translation
-    absolute_diff = tf.cast(tf.abs(logitsR - actual), tf.float32)
-    loc_loss = tf.reduce_sum(tf.where(tf.less(absolute_diff, 1), 0.5 * tf.square(absolute_diff), absolute_diff - 0.5), axis=1) * object_mask
+        # Avoid NaN in division and log below.
+        ha += 1e-8
+        wa += 1e-8
+        h += 1e-8
+        w += 1e-8
 
-    # Normalize by number of objects included here
-    loc_loss = tf.divide(tf.reduce_sum(loc_loss), tf.reduce_sum(object_mask))*loc_loss_factor/4
+        # Calculate the normalized translations ACTUALLY required to shift the bbox
+        tx, ty = (cenx - cenxa) / wa, (ceny - cenya) / ha
+        tw, th = tf.log(w / wa), tf.log(h / ha)
+        actual = tf.transpose(tf.stack([ty, tx, th, tw]))
+
+        # Get loss for each translation
+        absolute_diff = tf.cast(tf.abs(logitsR - actual), tf.float32)
+        loc_loss = tf.reduce_sum(tf.where(tf.less(absolute_diff, 1), 0.5 * tf.square(absolute_diff), absolute_diff - 0.5), axis=1) * object_mask
+
+        # Normalize by number of objects included here
+        loc_loss = tf.divide(tf.reduce_sum(loc_loss), tf.reduce_sum(object_mask))*loc_loss_factor/4
 
     """
     Classification loss
@@ -153,19 +161,21 @@ def total_loss(logits, labels):
     """
 
     # Add losses
-    total_loss = class_loss + loc_loss
+    if FLAGS.net_type == 'RPN': total_loss = class_loss + loc_loss
+    else: total_loss = class_loss
 
     # Output the summary of the MSE and MAE
     tf.summary.scalar('Class_Loss', class_loss)
-    tf.summary.scalar('Loc_Loss', loc_loss)
+    if FLAGS.net_type == 'RPN': tf.summary.scalar('Loc_Loss', loc_loss)
     tf.summary.scalar('Tot_Loss', total_loss)
 
     # Add these losses to the collection
     tf.add_to_collection('losses', class_loss)
-    tf.add_to_collection('losses', loc_loss)
+    if FLAGS.net_type == 'RPN': tf.add_to_collection('losses', loc_loss)
     tf.add_to_collection('losses', total_loss)
 
-    return total_loss, class_loss, loc_loss
+    if FLAGS.net_type == 'RPN': return total_loss, class_loss, loc_loss
+    else: return total_loss, class_loss, class_loss
 
 
 def backward_pass(total_loss):

@@ -27,12 +27,12 @@ tf.app.flags.DEFINE_string('training_dir', 'training/', """Path to the training 
 tf.app.flags.DEFINE_integer('box_dims', 64, """dimensions to save files""")
 tf.app.flags.DEFINE_integer('network_dims', 64, """dimensions of the network input""")
 tf.app.flags.DEFINE_integer('repeats', 20, """epochs to repeat before reloading""")
-tf.app.flags.DEFINE_string('net_type', 'RPN', """Network predicting CEN, BBOX or RPN""")
+tf.app.flags.DEFINE_string('net_type', 'RPNC', """Network predicting CEN, BBOX or RPN""")
 
 # Define some of the immutable variables
-tf.app.flags.DEFINE_integer('num_epochs', 100, """Number of epochs to run""")
+tf.app.flags.DEFINE_integer('num_epochs', 200, """Number of epochs to run""")
 tf.app.flags.DEFINE_integer('epoch_size', int(1e6), """Realy 7.7 mil studies but make epoch 1 mil""")
-tf.app.flags.DEFINE_integer('print_interval', 7, """How often to print a summary to console during training""")
+tf.app.flags.DEFINE_integer('print_interval', 10, """How often to print a summary to console during training""")
 tf.app.flags.DEFINE_float('checkpoint_interval', 7.7, """How many Epochs to wait before saving a checkpoint""")
 tf.app.flags.DEFINE_integer('batch_size', 1024, """Number of images to process in a batch.""")
 
@@ -42,18 +42,20 @@ tf.app.flags.DEFINE_float('l2_gamma', 1e-3, """ The gamma value for regularizati
 tf.app.flags.DEFINE_float('moving_avg_decay', 0.999, """ The decay rate for the moving average tracker""")
 
 # Hyperparameters to control the optimizer
-tf.app.flags.DEFINE_float('learning_rate',5e-4, """Initial learning rate""")
+tf.app.flags.DEFINE_float('learning_rate',1e-4, """Initial learning rate""")
 tf.app.flags.DEFINE_float('beta1', 0.9, """ The beta 1 value for the adam optimizer""")
 tf.app.flags.DEFINE_float('beta2', 0.999, """ The beta 1 value for the adam optimizer""")
 
 # Directory control
 tf.app.flags.DEFINE_string('train_dir', 'training/', """Directory to write event logs and save checkpoint files""")
-tf.app.flags.DEFINE_string('RunInfo', 'RPN1/', """Unique file name for this training run""")
-tf.app.flags.DEFINE_integer('GPU', 0, """Which GPU to use""")
+tf.app.flags.DEFINE_string('RunInfo', 'RPN4/', """Unique file name for this training run""")
+tf.app.flags.DEFINE_integer('GPU', 1, """Which GPU to use""")
 
 """
-GPU 0: RPN1 LR 5e-4
-GPU 1: RPN2 LR 1e-4
+GPU 0: RPN2 LR 1e-4, image norm, incr network
+GPU 1: RPN4 LR 1e-4, image norm, incr network, class only
+Tried: LR 2.5e-4 (Collapse early), 1e-4 no norm (collapse late)
+Ready: RPN1, RPN3
 """
 
 def train():
@@ -80,6 +82,7 @@ def train():
 
         # Calculate loss
         combined_loss, class_loss, loc_loss = network.total_loss(all_logits, labels)
+        all_logits_dsp = (tf.nn.softmax(all_logits[0]), all_logits[1])
 
         # Add the L2 regularization loss
         loss = tf.add(combined_loss, l2loss, name='TotalLoss')
@@ -160,7 +163,7 @@ def train():
 
                         # Load some metrics
                         _lbls, _logs, _combinedLoss, _clsLoss, _locLoss, _l2loss, _totLoss, _id = mon_sess.run([
-                            labels, all_logits, combined_loss, class_loss, loc_loss, l2loss, loss, data['view']],
+                            labels, all_logits_dsp, combined_loss, class_loss, loc_loss, l2loss, loss, data['view']],
                             feed_dict={phase_train: True})
 
                         # Make losses display in ppt
@@ -198,8 +201,13 @@ def train():
 
                         print('*** Pos in Batch %s of %s,  Labels/Logits: ***' % (pct, FLAGS.batch_size))
                         for z in range(10):
-                            print('%s -- Class Label: %s, Pred %s' % (_id[z], _lblsCls[z], np.argmax(_logs[0][z])), end=' ')
-                            print ('Box Cen: %s, Anchor Cen: %s, Predicted norm Change: %s' %(_lblsCen[z], _lblsCena[z], _logs[1][z]))
+                            if FLAGS.net_type == 'RPN':
+                                print('%s -- Class Label: %s, Pred %s %s' % (
+                                _id[z], _lblsCls[z], np.argmax(_logs[0][z]), _logs[0][z]), end=' ')
+                                print ('Box Cen: %s, Anchor Cen: %s, Predicted norm Change: %s' %(_lblsCen[z], _lblsCena[z], _logs[1][z]))
+                            else:
+                                print('%s -- Class Label: %s, Pred %s %s' % (
+                                _id[z], _lblsCls[z], np.argmax(_logs[0][z]), _logs[0][z]))
 
                         # Run a session to retrieve our summaries
                         summary = mon_sess.run(all_summaries, feed_dict={phase_train: True})
