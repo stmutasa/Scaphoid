@@ -48,7 +48,7 @@ tf.app.flags.DEFINE_float('beta2', 0.999, """ The beta 1 value for the adam opti
 
 # Directory control
 tf.app.flags.DEFINE_string('train_dir', 'training/', """Directory to write event logs and save checkpoint files""")
-tf.app.flags.DEFINE_string('RunInfo', 'RPN_FL2/', """Unique file name for this training run""")
+tf.app.flags.DEFINE_string('RunInfo', 'RPN_FL_Norm/', """Unique file name for this training run""")
 tf.app.flags.DEFINE_integer('GPU', 0, """Which GPU to use""")
 
 """
@@ -109,7 +109,7 @@ def train():
         var_restore = var_ema.variables_to_restore()
 
         # Initialize the saver
-        saver = tf.train.Saver(var_restore, max_to_keep=10)
+        saver = tf.train.Saver(var_restore, max_to_keep=20)
 
         # -------------------  Session Initializer  ----------------------
 

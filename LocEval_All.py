@@ -29,7 +29,7 @@ tf.app.flags.DEFINE_string('training_dir', 'training/', """Path to the training 
 tf.app.flags.DEFINE_integer('box_dims', 64, """dimensions to save files""")
 tf.app.flags.DEFINE_integer('network_dims', 64, """dimensions of the network input""")
 tf.app.flags.DEFINE_integer('epoch_size', 2449062, """How many examples""")
-tf.app.flags.DEFINE_integer('batch_size', 3069, """Number of images to process in a batch.""")
+tf.app.flags.DEFINE_integer('batch_size', 5301, """Number of images to process in a batch.""")
 
 # Hyperparameters:
 tf.app.flags.DEFINE_float('dropout_factor', 0.75, """ Keep probability""")
@@ -39,7 +39,7 @@ tf.app.flags.DEFINE_float('moving_avg_decay', 0.999, """ The decay rate for the 
 tf.app.flags.DEFINE_string('train_dir', 'training/', """Directory where to retrieve checkpoint files""")
 tf.app.flags.DEFINE_string('net_type', 'RPNC', """Network predicting CEN or BBOX""")
 tf.app.flags.DEFINE_string('RunInfo', 'RPN_FL2/', """Unique file name for this training run""")
-tf.app.flags.DEFINE_integer('GPU', 0, """Which GPU to use""")
+tf.app.flags.DEFINE_integer('GPU', 1, """Which GPU to use""")
 
 # Define a custom training class
 def test():
@@ -78,7 +78,7 @@ def test():
         saver = tf.train.Saver(var_restore, max_to_keep=3)
 
         # Trackers for best performers
-        best_SN, best_epoch = 0.1, 0
+        best_SN, best_epoch, best_Unique = 0.1, 0, 0.5
 
         # Tester instance
         sdt = SDT.SODTester(False, True)
@@ -95,7 +95,7 @@ def test():
 
                 saver.restore(mon_sess, checkpoint)
                 Epoch = checkpoint.split('/')[-1].split('Epoch')[-1]
-                print("*** Testich Checkpoint %s Run %s on GPU %s ****" % (checkpoint, FLAGS.RunInfo, FLAGS.GPU))
+                print("*** Testing Checkpoint %s Run %s on GPU %s ****" % (checkpoint, FLAGS.RunInfo, FLAGS.GPU))
 
                 # Initialize the variables
                 mon_sess.run([var_init, iterator.initializer])
@@ -114,8 +114,7 @@ def test():
                     while step < max_steps:
 
                         # Load some metrics for testing
-                        __lbls, __logs, _accno = mon_sess.run([labels, logits, data['accno']],
-                                                              feed_dict={phase_train: False})
+                        __lbls, __logs, _accno = mon_sess.run([labels, logits, data['accno']], feed_dict={phase_train: False})
 
                         # Only keep positive
                         positives_here = np.sum(__lbls[:, 19])
@@ -157,16 +156,20 @@ def test():
                     Acc = 100 * (TP + TN) / (TN + TP + FN + FP)
                     Unique, Counts = np.unique(Unique, return_counts=True)
                     Unique_all = np.unique(Unique)
-                    print("\nEpoch:%s (Best %s-%s), Accnos with True Positives: %s of %s" %
-                          (Epoch, best_epoch, best_SN, Unique.shape[0], Unique_all.shape[0]))
+                    try: mincnt = np.argmin(Counts)
+                    except: mincnt = 'Error'
+                    pct_Unq = 100 * Unique.shape[0] / (77)
+                    print("\nEpoch:%s (Best %s-%.3f, %.3f Unique), Accnos with True Positives: %s of %s (%s%% - As little as %s)" %
+                        (Epoch, best_epoch, best_SN, best_Unique, Unique.shape[0], Unique_all.shape[0], pct_Unq, mincnt))
                     print('*** Sn:%.3f, Sp:%.3f, PPv:%.3f, NPv:%.3f ***' % (SN, SP, PPV, NPV))
-                    print('*** Acc:%.2f TP:%s, TN:%s, FP:%s, FN:%s ***' % (Acc, TP, TN, FP, FN))
+                    print('*** Acc:%.2f TP:%s, TN:%s, FP:%s, FN:%s ***\n' % (Acc, TP, TN, FP, FN))
                     sdt.MAE = SN
 
                     # Lets save runs that perform well
-                    if sdt.MAE > best_SN:
+                    if sdt.MAE >= best_SN and pct_Unq >= best_Unique:
                         best_SN = sdt.MAE
                         best_epoch = Epoch
+                        best_Unique = pct_Unq
 
                     # Shut down the session
                     del Unique_all, Unique

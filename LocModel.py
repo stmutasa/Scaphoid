@@ -52,7 +52,7 @@ def forward_pass_RPN(images, phase_train):
     conv = sdn.residual_layer('Conv4e', conv, 3, K * 8, 1, phase_train=phase_train)
     conv = sdn.residual_layer('Conv4f', conv, 3, K * 8, 1, phase_train=phase_train)
     conv = sdn.residual_layer('Conv4g', conv, 3, K * 8, 1, phase_train=phase_train)
-    conv = sdn.residual_layer('Conv4h', conv, 3, K * 8, 1, phase_train=phase_train)
+    conv = sdn.residual_layer('Conv4h', conv, 3, K * 8, 1, phase_train=phase_train) # Smaller End Here
 
     # At this point split into classifier and regressor
     convC = sdn.inception_layer('ConvC1', conv, K * 16, S=2, phase_train=phase_train)  # 4
@@ -87,9 +87,8 @@ def total_loss(logits, labels):
     """
 
     # Loss factors: 1e2, 0.0 and 2.0 lead to nan. 1e2, 1e-3 and 1.0 lead to nana
-    class_loss_factor = 1e2
-    loc_loss_factor = 1e-4
-    foreground_class_weight = 2.0
+    class_loss_factor = 1.0
+    loc_loss_factor = 1.0
 
     # Squish
     labels = tf.cast(tf.squeeze(labels), tf.float32)
@@ -134,26 +133,11 @@ def total_loss(logits, labels):
     """
     Classification loss
     """
+
     # Change labels to one hot
     labelsC = tf.one_hot(tf.cast(labels[:, 19], tf.uint8), depth=2, dtype=tf.uint8)
 
-    # # Make a weighting mask for object foreground classification loss
-    # class_mask = tf.cast(labels[:, 19] > 0, tf.float32)
-    #
-    # # Now multiply this mask by scaling factor then add back to labels. Add 1 to prevent 0 loss
-    # class_mask = tf.add(tf.multiply(class_mask, foreground_class_weight), 1)
-    #
-    # # Calculate  loss
-    # class_loss = tf.nn.softmax_cross_entropy_with_logits_v2(labels=tf.squeeze(labelsC), logits=logitsC)
-    #
-    # # Add in classification mask
-    # if foreground_class_weight != 1.0: class_loss = tf.multiply(class_loss, tf.squeeze(class_mask))
-    #
-    # # Reduce to scalar
-    # class_loss = tf.reduce_sum(class_loss)
-
-    # Use focal loss, 1 or 2
-    # class_loss = focal_loss(logitsC, labelsC)
+    # Use focal loss
     class_loss = tf.reduce_sum(focal_softmax_cross_entropy_with_logits(labelsC, logitsC))
 
     # Normalize by minibatch size
@@ -244,40 +228,18 @@ def inputs(training=True, skip=False):
     return Input.load_protobuf(training)
 
 
-from tensorflow.python.ops import array_ops
-def focal_loss(prediction_tensor, target_tensor, weights=None, alpha=0.25, gamma=2):
-    r"""Compute focal loss for predictions.
-        Multi-labels Focal loss formula:
-            FL = -alpha * (z-p)^gamma * log(p) -(1-alpha) * p^gamma * log(1-p)
-                 ,which alpha = 0.25, gamma = 2, p = sigmoid(x), z = target_tensor.
-    Args:
-     prediction_tensor: A float tensor of shape [batch_size, num_anchors,
-        num_classes] representing the predicted logits for each class
-     target_tensor: A float tensor of shape [batch_size, num_anchors,
-        num_classes] representing one-hot encoded classification targets
-     weights: A float tensor of shape [batch_size, num_anchors]
-     alpha: A scalar tensor for focal loss alpha hyper-parameter
-     gamma: A scalar tensor for focal loss gamma hyper-parameter
-    Returns:
-        loss: A (scalar) tensor representing the value of the loss function
+def focal_softmax_cross_entropy_with_logits(labels, logits, focus=2.0, alpha=0.25, eps=1e-7, name='focal_softmax_cross_entropy_with_logits'):
     """
-    target_tensor = tf.cast(target_tensor, tf.float32)
-    sigmoid_p = tf.nn.sigmoid(prediction_tensor)
-    zeros = array_ops.zeros_like(sigmoid_p, dtype=sigmoid_p.dtype)
+    Tensorflow implementation of focal loss from RetinaNet
+    :param labels:
+    :param logits:
+    :param focus:
+    :param alpha:
+    :param eps:
+    :param name:
+    :return:
+    """
 
-    # For poitive prediction, only need consider front part loss, back part is 0;
-    # target_tensor > zeros <=> z=1, so poitive coefficient = z - p.
-    pos_p_sub = array_ops.where(target_tensor > zeros, target_tensor - sigmoid_p, zeros)
-
-    # For negative prediction, only need consider back part loss, front part is 0;
-    # target_tensor > zeros <=> z=1, so negative coefficient = 0.
-    neg_p_sub = array_ops.where(target_tensor > zeros, zeros, sigmoid_p)
-    per_entry_cross_ent = - alpha * (pos_p_sub ** gamma) * tf.log(tf.clip_by_value(sigmoid_p, 1e-8, 1.0)) \
-                          - (1 - alpha) * (neg_p_sub ** gamma) * tf.log(tf.clip_by_value(1.0 - sigmoid_p, 1e-8, 1.0))
-    return tf.reduce_sum(per_entry_cross_ent)
-
-def focal_softmax_cross_entropy_with_logits(
-        labels, logits, focus=2.0, alpha=0.25, eps=1e-7, name='focal_softmax_cross_entropy_with_logits'):
     with tf.name_scope(name):
         alpha = tf.multiply(tf.cast(tf.ones_like(labels), tf.float32), alpha)
 

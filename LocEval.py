@@ -39,7 +39,7 @@ tf.app.flags.DEFINE_float('moving_avg_decay', 0.999, """ The decay rate for the 
 tf.app.flags.DEFINE_string('train_dir', 'training/', """Directory where to retrieve checkpoint files""")
 tf.app.flags.DEFINE_string('net_type', 'RPNC', """Network predicting CEN or BBOX""")
 tf.app.flags.DEFINE_string('RunInfo', 'RPN_FL2/', """Unique file name for this training run""")
-tf.app.flags.DEFINE_integer('GPU', 0, """Which GPU to use""")
+tf.app.flags.DEFINE_integer('GPU', 1, """Which GPU to use""")
 
 # Define a custom training class
 def test():
@@ -91,9 +91,6 @@ def test():
             config.gpu_options.allow_growth = True
             with tf.Session(config=config) as mon_sess:
 
-                # Print run info
-                print("*** Validation Run %s on GPU %s ****" % (FLAGS.RunInfo, FLAGS.GPU))
-
                 # Retreive the checkpoint
                 ckpt = tf.train.get_checkpoint_state(FLAGS.train_dir+FLAGS.RunInfo)
 
@@ -107,11 +104,14 @@ def test():
                     saver.restore(mon_sess, ckpt.model_checkpoint_path)
 
                     # Extract the epoch
-                    Epoch = ckpt.model_checkpoint_path.split('/')[-1].split('Epoch')[-1]
+                    Epoch = ckpt.model_checkpoint_path.split('/')[-1].split('_')[-1]
 
                 else:
                     print ('No checkpoint file found')
                     break
+
+                # Print run info
+                print("*** Epoch %s Validation Run %s on GPU %s ****" % (Epoch, FLAGS.RunInfo, FLAGS.GPU))
 
                 # Initialize the step counter
                 step, made = 0, False
@@ -171,13 +171,15 @@ def test():
                     Acc = 100 * (TP + TN) / (TN+TP+FN+FP)
                     Unique, Counts = np.unique(Unique, return_counts=True)
                     Unique_all = np.unique(Unique)
-                    print ("\nEpoch:%s, Accnos with True Positives: %s of %s" %(Epoch, Unique.shape[0], Unique_all.shape[0]))
-                    print ('*** Sn:%.3f, Sp:%.3f, PPv:%.3f, NPv:%.3f ***' %(SN, SP, PPV, NPV))
-                    print ('*** Acc:%.2f TP:%s, TN:%s, FP:%s, FN:%s ***' %(Acc, TP, TN, FP, FN))
+                    pct_Unq = 100 * Unique.shape[0] / (Unique_all.shape[0] + 1e-8)
+                    print('\n*** Sn:%.3f, Sp:%.3f, PPv:%.3f, NPv:%.3f ***' % (SN, SP, PPV, NPV))
+                    print('*** Acc:%.2f TP:%s, TN:%s, FP:%s, FN:%s ***' % (Acc, TP, TN, FP, FN))
+                    print("Epoch:%s (Best %s-%.3f), Accnos with True Positives: %s of %s (%s%% - As little as %s)\n" %
+                          (Epoch, best_epoch, best_SN, Unique.shape[0], Unique_all.shape[0], pct_Unq, np.argmin(Counts)))
                     sdt.MAE = SN
 
                     # Lets save runs that perform well
-                    if sdt.MAE > best_SN:
+                    if sdt.MAE >= best_SN:
 
                         # Save the checkpoint
                         print(" ---------------- SAVING THIS ONE %s", ckpt.model_checkpoint_path)
@@ -190,7 +192,7 @@ def test():
                         saver.save(mon_sess, checkpoint_file)
                         #sdl.save_Dict_CSV(data, csv_file)
 
-                        # Save a new best MAE
+                        # Save best runs
                         best_SN = sdt.MAE
                         best_epoch = Epoch
 
@@ -199,7 +201,9 @@ def test():
                     mon_sess.close()
 
             # Break if this is the final checkpoint
-            if '100' in Epoch: break
+            #if '100' in Epoch: break
+            # TODO: Testoing
+            break
 
             # Print divider
             print('-' * 70)
