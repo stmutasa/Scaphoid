@@ -44,9 +44,8 @@ tf.app.flags.DEFINE_integer('GPU', 0, """Which GPU to use""")
 # Define a custom training class
 def test():
 
-
     # Makes this the default graph where all ops will be added
-    #with tf.Graph().as_default(), tf.device('/cpu:0'):
+    # with tf.Graph().as_default(), tf.device('/cpu:0'):
     with tf.Graph().as_default(), tf.device('/gpu:' + str(FLAGS.GPU)):
 
         # Define phase of training
@@ -84,39 +83,25 @@ def test():
         # Tester instance
         sdt = SDT.SODTester(False, True)
 
-        while True:
+        # Allow memory placement growth
+        config = tf.ConfigProto(log_device_placement=False, allow_soft_placement=True)
+        config.gpu_options.allow_growth = True
 
-            # Allow memory placement growth
-            config = tf.ConfigProto(log_device_placement=False, allow_soft_placement=True)
-            config.gpu_options.allow_growth = True
+        # Retreive the checkpoint
+        ckpt = tf.train.get_checkpoint_state(FLAGS.train_dir + FLAGS.RunInfo)
+        for checkpoint in ckpt.all_model_checkpoint_paths:
+
             with tf.Session(config=config) as mon_sess:
 
-                # Print run info
-                print("*** Validation Run %s on GPU %s ****" % (FLAGS.RunInfo, FLAGS.GPU))
-
-                # Retreive the checkpoint
-                ckpt = tf.train.get_checkpoint_state(FLAGS.train_dir+FLAGS.RunInfo)
+                saver.restore(mon_sess, checkpoint)
+                Epoch = checkpoint.split('/')[-1].split('Epoch')[-1]
+                print("*** Testich Checkpoint %s Run %s on GPU %s ****" % (checkpoint, FLAGS.RunInfo, FLAGS.GPU))
 
                 # Initialize the variables
-                mon_sess.run(var_init)
-                mon_sess.run(iterator.initializer)
-
-                if ckpt and ckpt.model_checkpoint_path:
-
-                    # Restore the model
-                    saver.restore(mon_sess, ckpt.model_checkpoint_path)
-
-                    # Extract the epoch
-                    Epoch = ckpt.model_checkpoint_path.split('/')[-1].split('Epoch')[-1]
-
-                else:
-                    print ('No checkpoint file found')
-                    break
+                mon_sess.run([var_init, iterator.initializer])
 
                 # Initialize the step counter
                 step, made = 0, False
-
-                # Init stats
                 TP, TN, FP, FN = 0, 0, 0, 0
 
                 # Set the max step count
@@ -129,7 +114,8 @@ def test():
                     while step < max_steps:
 
                         # Load some metrics for testing
-                        __lbls, __logs, _accno = mon_sess.run([labels, logits, data['accno']], feed_dict={phase_train: False})
+                        __lbls, __logs, _accno = mon_sess.run([labels, logits, data['accno']],
+                                                              feed_dict={phase_train: False})
 
                         # Only keep positive
                         positives_here = np.sum(__lbls[:, 19])
@@ -168,29 +154,17 @@ def test():
                     # Calculate final stats
                     SN, SP = TP / (TP + FN), TN / (TN + FP)
                     PPV, NPV = TP / (TP + FP), TN / (TN + FN)
-                    Acc = 100 * (TP + TN) / (TN+TP+FN+FP)
+                    Acc = 100 * (TP + TN) / (TN + TP + FN + FP)
                     Unique, Counts = np.unique(Unique, return_counts=True)
                     Unique_all = np.unique(Unique)
-                    print ("\nEpoch:%s, Accnos with True Positives: %s of %s" %(Epoch, Unique.shape[0], Unique_all.shape[0]))
-                    print ('*** Sn:%.3f, Sp:%.3f, PPv:%.3f, NPv:%.3f ***' %(SN, SP, PPV, NPV))
-                    print ('*** Acc:%.2f TP:%s, TN:%s, FP:%s, FN:%s ***' %(Acc, TP, TN, FP, FN))
+                    print("\nEpoch:%s (Best %s-%s), Accnos with True Positives: %s of %s" %
+                          (Epoch, best_epoch, best_SN, Unique.shape[0], Unique_all.shape[0]))
+                    print('*** Sn:%.3f, Sp:%.3f, PPv:%.3f, NPv:%.3f ***' % (SN, SP, PPV, NPV))
+                    print('*** Acc:%.2f TP:%s, TN:%s, FP:%s, FN:%s ***' % (Acc, TP, TN, FP, FN))
                     sdt.MAE = SN
 
                     # Lets save runs that perform well
                     if sdt.MAE > best_SN:
-
-                        # Save the checkpoint
-                        print(" ---------------- SAVING THIS ONE %s", ckpt.model_checkpoint_path)
-
-                        # Define the filenames
-                        checkpoint_file = os.path.join('testing/' + FLAGS.RunInfo, ('Epoch_%s_MAE_%0.3f' % (Epoch, sdt.MAE)))
-                        #csv_file = os.path.join('testing/' + FLAGS.RunInfo, ('%s_E_%s_AUC_%0.2f.csv' % (FLAGS.RunInfo[:-1], Epoch, sdt.MAE)))
-
-                        # Save the checkpoint
-                        saver.save(mon_sess, checkpoint_file)
-                        #sdl.save_Dict_CSV(data, csv_file)
-
-                        # Save a new best MAE
                         best_SN = sdt.MAE
                         best_epoch = Epoch
 
@@ -198,34 +172,8 @@ def test():
                     del Unique_all, Unique
                     mon_sess.close()
 
-            # Break if this is the final checkpoint
-            if '100' in Epoch: break
-
-            # Print divider
-            print('-' * 70)
-
-            # Otherwise check folder for changes
-            filecheck = glob.glob(FLAGS.train_dir+FLAGS.RunInfo + '*')
-            newfilec = filecheck
-
-            # Sleep if no changes
-            while filecheck == newfilec:
-
-                # Sleep an amount of time proportional to the epoch size
-                time.sleep(int(FLAGS.epoch_size * 0.05))
-
-                # Recheck the folder for changes
-                newfilec = glob.glob(FLAGS.train_dir+FLAGS.RunInfo + '*')
-
-
-
-def main(argv=None):  # pylint: disable=unused-argument
-    time.sleep(0)
-    if tf.gfile.Exists('testing/'):
-        tf.gfile.DeleteRecursively('testing/')
-    tf.gfile.MakeDirs('testing/')
+def main(argv=None):
     test()
-
 
 if __name__ == '__main__':
     tf.app.run()

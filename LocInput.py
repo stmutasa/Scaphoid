@@ -358,10 +358,10 @@ def load_protobuf(training=True):
     if training:
 
         # Define our undersample and oversample filtering functions
-        _filter_fn = lambda x: sdl.undersample_filter(x['box_data'][19], actual_dists=[0.999, 0.001], desired_dists=[.7, .3])
+        _filter_fn = lambda x: sdl.undersample_filter(x['box_data'][19], actual_dists=[0.999, 0.001], desired_dists=[.99, .01])
         _undersample_filter = lambda x: dataset.filter(_filter_fn)
         _oversample_filter = lambda x: tf.data.Dataset.from_tensors(x).repeat(
-            sdl.oversample_class(x['box_data'][19], actual_dists=[0.999, 0.001], desired_dists=[.7, .3]))
+            sdl.oversample_class(x['box_data'][19], actual_dists=[0.999, 0.001], desired_dists=[.99, .01]))
 
         # Large shuffle, repeat for xx epochs then parse the labels only
         dataset = dataset.shuffle(buffer_size=FLAGS.epoch_size//2)
@@ -385,7 +385,7 @@ def load_protobuf(training=True):
 
     # Batch and prefetch
     if training: dataset = dataset.batch(FLAGS.batch_size, drop_remainder=True).prefetch(tf.data.experimental.AUTOTUNE)
-    else: dataset = dataset.batch(FLAGS.batch_size)
+    else: dataset = dataset.batch(FLAGS.batch_size).prefetch(tf.data.experimental.AUTOTUNE)
 
     # Make an initializable iterator
     iterator = dataset.make_initializable_iterator()
@@ -489,11 +489,12 @@ class DataPreprocessor(object):
 
     else: # Validation
 
+        image = tf.expand_dims(image, -1)
+
         # Normalize the image
-        #image = tf.image.per_image_standardization(image)
+        image = tf.image.per_image_standardization(image)
 
         # Resize to network size
-        image = tf.expand_dims(image, -1)
         image = tf.image.resize_images(image, [FLAGS.network_dims, FLAGS.network_dims], tf.compat.v1.image.ResizeMethod.BICUBIC)
 
     # Make record image
