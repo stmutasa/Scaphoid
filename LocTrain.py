@@ -48,16 +48,9 @@ tf.app.flags.DEFINE_float('beta2', 0.999, """ The beta 1 value for the adam opti
 
 # Directory control
 tf.app.flags.DEFINE_string('train_dir', 'training/', """Directory to write event logs and save checkpoint files""")
-tf.app.flags.DEFINE_string('RunInfo', 'RPN_FL_Norm/', """Unique file name for this training run""")
-tf.app.flags.DEFINE_integer('GPU', 0, """Which GPU to use""")
+tf.app.flags.DEFINE_string('RunInfo', 'RPN_FL_NoGC/', """Unique file name for this training run""")
+tf.app.flags.DEFINE_integer('GPU', 1, """Which GPU to use""")
 
-"""
-GPU 0: RPN_FL2, focal loss function 2
-GPU 1: RPN_FL, focal loss
-Tried: LR 2.5e-4 (Collapse early), 1e-4 no norm (collapse late), [RPN2 LR 1e-4, image norm, incr network, +LOC] - no loc anyway
-    [RPN4 LR 1e-4, image norm, smaller network, class only] [RPN2 LR 1e-3, image norm, incr network, class only]
-Ready: RPN1, RPN3, RPN4 [big network, LR 1e-4]
-"""
 
 def train():
 
