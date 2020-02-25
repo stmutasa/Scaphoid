@@ -5,7 +5,7 @@ To train the Localization model
 import os
 import time
 
-import LocModel as network
+import ClassModel as network
 import numpy as np
 import tensorflow as tf
 import SODLoader as SDL
@@ -23,17 +23,16 @@ FLAGS = tf.app.flags.FLAGS
 
 # Define some of the data variables
 tf.app.flags.DEFINE_string('data_dir', tfrecords_dir, """Path to the data directory.""")
-tf.app.flags.DEFINE_string('training_dir', 'training/', """Path to the training directory.""")
 tf.app.flags.DEFINE_integer('box_dims', 64, """dimensions to save files""")
 tf.app.flags.DEFINE_integer('network_dims', 64, """dimensions of the network input""")
-tf.app.flags.DEFINE_integer('repeats', 20, """epochs to repeat before reloading""")
+tf.app.flags.DEFINE_integer('repeats', 10, """epochs to repeat before reloading""")
 tf.app.flags.DEFINE_string('net_type', 'RPNC', """Network predicting CEN, BBOX or RPN""")
 
 # Define some of the immutable variables
-tf.app.flags.DEFINE_integer('num_epochs', 200, """Number of epochs to run""")
-tf.app.flags.DEFINE_integer('epoch_size', int(1e6), """Realy 7.7 mil studies but make epoch 1 mil""")
-tf.app.flags.DEFINE_integer('print_interval', 10, """How often to print a summary to console during training""")
-tf.app.flags.DEFINE_float('checkpoint_interval', 7.7, """How many Epochs to wait before saving a checkpoint""")
+tf.app.flags.DEFINE_integer('num_epochs', 100, """Number of epochs to run""")
+tf.app.flags.DEFINE_integer('epoch_size', int(9.5e4), """Classifier is less data""")
+tf.app.flags.DEFINE_integer('print_interval', 5, """How often to print a summary to console during training""")
+tf.app.flags.DEFINE_float('checkpoint_interval', 2, """How many Epochs to wait before saving a checkpoint""")
 tf.app.flags.DEFINE_integer('batch_size', 1024, """Number of images to process in a batch.""")
 
 # Hyperparameters:
@@ -42,13 +41,14 @@ tf.app.flags.DEFINE_float('l2_gamma', 1e-3, """ The gamma value for regularizati
 tf.app.flags.DEFINE_float('moving_avg_decay', 0.999, """ The decay rate for the moving average tracker""")
 
 # Hyperparameters to control the optimizer
-tf.app.flags.DEFINE_float('learning_rate',1e-3, """Initial learning rate""")
+tf.app.flags.DEFINE_float('learning_rate',1e-5, """Initial learning rate""")
 tf.app.flags.DEFINE_float('beta1', 0.9, """ The beta 1 value for the adam optimizer""")
 tf.app.flags.DEFINE_float('beta2', 0.999, """ The beta 1 value for the adam optimizer""")
 
 # Directory control
 tf.app.flags.DEFINE_string('train_dir', 'training/', """Directory to write event logs and save checkpoint files""")
-tf.app.flags.DEFINE_string('RunInfo', 'tester/', """Unique file name for this training run""")
+tf.app.flags.DEFINE_string('RunInfo', 'Class1/', """Unique file name for this training run""")
+tf.app.flags.DEFINE_string('PTModel', 'RPN_FL2/', """The pretrained model to load""")
 tf.app.flags.DEFINE_integer('GPU', 1, """Which GPU to use""")
 
 
@@ -68,24 +68,25 @@ def train():
         data['data'] = tf.reshape(data['data'], [FLAGS.batch_size, FLAGS.network_dims, FLAGS.network_dims, 1])
 
         # Perform the forward pass:
-        all_logits = network.forward_pass_RPN(data['data'], phase_train=phase_train)
+        logits = network.forward_pass_RPN(data['data'], phase_train=phase_train)
         l2loss = network.sdn.calc_L2_Loss(FLAGS.l2_gamma)
 
         # Labels and logits
         labels = data['box_data']
 
         # Calculate loss
-        combined_loss, class_loss, loc_loss = network.total_loss(all_logits, labels)
-        all_logits_dsp = (tf.nn.softmax(all_logits[0]), all_logits[1])
+        SCE_loss = network.total_loss(logits, labels)
+        softmax = tf.nn.softmax(logits)
 
         # Add the L2 regularization loss
-        loss = tf.add(combined_loss, l2loss, name='TotalLoss')
+        TOT_loss = tf.add(SCE_loss, l2loss, name='TotalLoss')
 
         # Update the moving average batch norm ops
         extra_update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS)
 
         # Retreive the training operation with the applied gradients
-        with tf.control_dependencies(extra_update_ops): train_op = network.backward_pass(loss)
+        with tf.control_dependencies(extra_update_ops):
+            train_op = network.backward_pass(TOT_loss)
 
         # -------------------  Housekeeping functions  ----------------------
 
@@ -113,16 +114,22 @@ def train():
         print('Max Steps: %s, Print Interval: %s, Checkpoint: %s' % (max_steps, print_interval, checkpoint_interval))
 
         # Print Run info
-        print("*** Training Run %s on GPU %s ****" % (FLAGS.RunInfo, FLAGS.GPU))
+        print("*** Classification Training Run %s on GPU %s ****" % (FLAGS.RunInfo, FLAGS.GPU))
 
         # Allow memory placement growth
         config = tf.ConfigProto(log_device_placement=False, allow_soft_placement=True)
         config.gpu_options.allow_growth = True
         with tf.Session(config=config) as mon_sess:
 
-            # Initialize the variables and iterator
-            mon_sess.run(var_init)
-            mon_sess.run(iterator.initializer)
+            # Retreive the saved model checkpoint
+            ckpt = tf.train.get_checkpoint_state(FLAGS.train_dir + FLAGS.PTModel)
+
+            # Initialize the variables
+            mon_sess.run([var_init, iterator.initializer])
+
+            # Restore the model
+            if ckpt and ckpt.model_checkpoint_path:
+                saver.restore(mon_sess, ckpt.model_checkpoint_path)
 
             # Initialize the handle to the summary writer in our training directory
             summary_writer = tf.summary.FileWriter(FLAGS.train_dir + FLAGS.RunInfo, mon_sess.graph)
@@ -157,7 +164,7 @@ def train():
 
                         # Load some metrics
                         _lbls, _logs, _combinedLoss, _clsLoss, _locLoss, _l2loss, _totLoss, _id = mon_sess.run([
-                            labels, all_logits_dsp, combined_loss, class_loss, loc_loss, l2loss, loss, data['view']],
+                            labels, softmax, combined_loss, SCE_loss, loc_loss, l2loss, TOT_loss, data['view']],
                             feed_dict={phase_train: True})
 
                         # Make losses display in ppt
@@ -239,7 +246,6 @@ def main(argv=None):
         tf.gfile.DeleteRecursively(FLAGS.train_dir + FLAGS.RunInfo)
     tf.gfile.MakeDirs(FLAGS.train_dir + FLAGS.RunInfo)
     train()
-
 
 if __name__ == '__main__':
     tf.app.run()

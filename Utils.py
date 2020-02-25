@@ -494,8 +494,46 @@ def check_stats():
         index, np.max(ratio), np.min(ratio), np.average(ratio),  np.std(ratio)))
 
 
-# check_empty()
-# process_raw()
-#raw_to_PNG()
-#check_raw()
-#check_stats()
+def FL_Test():
+
+    """
+    Checking focal loss code
+    :return:
+    """
+
+    LBL = [[0, 1],[0, 1], [0, 1], [1, 0], [1, 0], [1, 0]]
+    LOG = [[-2, 2], [2, -2], [3, 2], [2, -2], [-2, 2], [-1, 0]]
+
+    labels = tf.constant(LBL, tf.uint8)
+    logits = tf.constant(LOG, tf.float32)
+
+    # To prevent underflow errors
+    eps = 1e-7
+
+    # Make array of ones and multiply by alpha
+    alpha = tf.multiply(tf.cast(tf.ones_like(labels), tf.float32), .25)
+
+    # Normalize the logits to class probabilities
+    prob = tf.nn.softmax(logits, -1)
+
+    # Returns True where the labels equal 1
+    labels_eq_1 = tf.equal(labels, 1)
+
+    # Where label is 1, return alpha, else return 1-alpha
+    a_balance = tf.where(labels_eq_1, alpha, 1 - alpha)
+
+    # Where label is 1, return the softmax unmodified, else return 1-softmax
+    prob_true = tf.where(labels_eq_1, prob, 1 - prob)
+
+    # Calculate the modulating factor
+    modulating_factor = (1.0 - prob_true) ** 2
+
+    log_prob = tf.log(prob + eps)
+    loss = a_balance * modulating_factor * tf.cast(labels, tf.float32) * log_prob
+
+    var_init = tf.group(tf.global_variables_initializer(), tf.local_variables_initializer())
+    with tf.Session() as sess:
+        sess.run(var_init)
+
+        outputs = sess.run([labels, logits, alpha, prob, labels_eq_1, a_balance, prob_true, modulating_factor, log_prob, loss])
+        print (outputs)

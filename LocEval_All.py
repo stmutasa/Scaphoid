@@ -38,7 +38,7 @@ tf.app.flags.DEFINE_float('moving_avg_decay', 0.999, """ The decay rate for the 
 # Directory control
 tf.app.flags.DEFINE_string('train_dir', 'training/', """Directory where to retrieve checkpoint files""")
 tf.app.flags.DEFINE_string('net_type', 'RPNC', """Network predicting CEN or BBOX""")
-tf.app.flags.DEFINE_string('RunInfo', 'RPN_FL2/', """Unique file name for this training run""")
+tf.app.flags.DEFINE_string('RunInfo', 'RPN_FL_NoGC/', """Unique file name for this training run""")
 tf.app.flags.DEFINE_integer('GPU', 0, """Which GPU to use""")
 
 # Define a custom training class
@@ -57,7 +57,7 @@ def test():
         data = iterator.get_next()
 
         # Define input shape
-        data['data'] = tf.reshape(data['data'], [FLAGS.batch_size, FLAGS.network_dims, FLAGS.network_dims])
+        data['data'] = tf.reshape(data['data'], [FLAGS.batch_size, FLAGS.network_dims, FLAGS.network_dims, 1])
 
         # Perform the forward pass:
         all_logits = network.forward_pass_RPN(data['data'], phase_train=phase_train)
@@ -94,13 +94,12 @@ def test():
 
             with tf.Session(config=config) as mon_sess:
 
+                # Initialize the variables
+                mon_sess.run([var_init, iterator.initializer])
+
                 saver.restore(mon_sess, checkpoint)
                 Epoch = checkpoint.split('/')[-1].split('Epoch')[-1]
                 print("*** Testing Checkpoint %s Run %s on GPU %s ****" % (checkpoint, FLAGS.RunInfo, FLAGS.GPU))
-
-                # Initialize the variables
-                mon_sess.run(var_init)
-                mon_sess.run(iterator.initializer)
 
                 # Initialize the step counter
                 step, made = 0, False
@@ -177,7 +176,6 @@ def test():
 
 def main(argv=None):  # pylint: disable=unused-argument
     test()
-
 
 if __name__ == '__main__':
     tf.app.run()
