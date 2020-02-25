@@ -228,41 +228,45 @@ def inputs(training=True, skip=False):
     return Input.load_protobuf(training)
 
 
-def focal_softmax_cross_entropy_with_logits(labels, logits, focus=2.0, alpha=0.25, name='focal_softmax_cross_entropy_with_logits'):
-    """
-    Tensorflow implementation of focal loss from RetinaNet: FL(pt) = −(1 − p)^γ * α * log(p)
-    :param labels: One hot labels in uint8
-    :param logits: Raw logits
-    :param focus: Higher value minimizes easy examples more. 0 = normal CE
-    :param alpha: balance importance of pos/neg examples, aka class weight
-    :param name:
-    :return: Losses reduced sum to the batch dimension [batch, 1]
-    """
+def focal_softmax_cross_entropy_with_logits(labels, logits, focus=2.0, alpha=[0.25, 0.75], name='focal_softmax_cross_entropy_with_logits'):
 
-    with tf.name_scope(name):
+        """
+        Tensorflow implementation of focal loss from RetinaNet: FL(pt) = −(1 − p)^γ * α * log(p)
+        :param labels: One hot labels in uint8
+        :param logits: Raw logits
+        :param focus: Higher value minimizes easy examples more. 0 = normal CE
+        :param alpha: Balance factor for each class: Array, list, or tuple of length num_classes
+        :param name: Scope
+        :return: Losses reduced sum to the batch dimension [batch, 1]
+        """
 
-        # To prevent underflow errors
-        eps = 1e-7
+        with tf.name_scope(name):
 
-        # Make array of ones and multiply by alpha
-        alpha = tf.multiply(tf.cast(tf.ones_like(labels), tf.float32), alpha)
+            # To prevent underflow errors
+            eps = 1e-7
 
-        # Normalize the logits to class probabilities
-        prob = tf.nn.softmax(logits, -1)
+            # Normalize the logits to class probabilities
+            prob = tf.nn.softmax(logits, -1)
 
-        # Returns True where the labels equal 1
-        labels_eq_1 = tf.equal(labels, 1)
+            # Returns True where the labels equal 1
+            labels_eq_1 = tf.equal(labels, 1)
 
-        # Where label is 1, return alpha, else return 1-alpha
-        a_balance = tf.where(labels_eq_1, alpha, 1 - alpha)
+            # Make the alpha array from the one hot label
+            alpha = tf.multiply(tf.cast(labels, tf.float32), tf.transpose(alpha))
 
-        # Where label is 1, return the softmax unmodified, else return 1-softmax
-        prob_true = tf.where(labels_eq_1, prob, 1 - prob)
+            # Reduce sum to collapse into one column
+            a_balance = tf.reduce_sum(alpha, axis=-1, keepdims=True)
 
-        # Calculate the modulating factor
-        modulating_factor = (1.0 - prob_true)**focus
+            # Where label is 1, return the softmax unmodified, else return 1-softmax
+            prob_true = tf.where(labels_eq_1, prob, 1 - prob)
 
-        log_prob = tf.log(prob + eps)
-        loss = -tf.reduce_sum(a_balance * modulating_factor * tf.cast(labels, tf.float32) * log_prob, -1)
+            # Calculate the modulating factor
+            modulating_factor = (1.0 - prob_true) ** focus
 
-        return loss
+            # Get the logits of the softmaxed values
+            log_prob = tf.log(prob + eps)
+
+            # Now calculate the loss: FL(pt) = −(1 − p)^γ * α * log(p)
+            loss = -tf.reduce_sum(a_balance * modulating_factor * tf.cast(labels, tf.float32) * log_prob, -1)
+
+            return loss

@@ -501,8 +501,8 @@ def FL_Test():
     :return:
     """
 
-    LBL = [[0, 1],[0, 1], [0, 1], [1, 0], [1, 0], [1, 0]]
-    LOG = [[-2, 2], [2, -2], [3, 2], [2, -2], [-2, 2], [-1, 0]]
+    LBL = [[0, 1, 0],[0, 0, 1], [1, 0, 0], [0, 1, 0],[0, 0, 1], [1, 0, 0]]
+    LOG = [[-2, 2, 0], [2, -2, 1], [3, 2, 1], [2, -2, 0], [-2, 2, 0], [-1, 0, 1]]
 
     labels = tf.constant(LBL, tf.uint8)
     logits = tf.constant(LOG, tf.float32)
@@ -511,7 +511,9 @@ def FL_Test():
     eps = 1e-7
 
     # Make array of ones and multiply by alpha
-    alpha = tf.multiply(tf.cast(tf.ones_like(labels), tf.float32), .25)
+    av = [0.25, 0.75, 1]
+    alpha = tf.multiply(tf.cast(labels, tf.float32), tf.transpose(av))
+    a_balance = tf.reduce_sum(alpha, axis=-1, keepdims=True)
 
     # Normalize the logits to class probabilities
     prob = tf.nn.softmax(logits, -1)
@@ -519,17 +521,15 @@ def FL_Test():
     # Returns True where the labels equal 1
     labels_eq_1 = tf.equal(labels, 1)
 
-    # Where label is 1, return alpha, else return 1-alpha
-    a_balance = tf.where(labels_eq_1, alpha, 1 - alpha)
-
-    # Where label is 1, return the softmax unmodified, else return 1-softmax
+    # Where one hot label tensor is 1, return the softmax unmodified, else return 1-softmax
     prob_true = tf.where(labels_eq_1, prob, 1 - prob)
 
     # Calculate the modulating factor
     modulating_factor = (1.0 - prob_true) ** 2
 
     log_prob = tf.log(prob + eps)
-    loss = a_balance * modulating_factor * tf.cast(labels, tf.float32) * log_prob
+    # Now calculate the loss: FL(pt) = −(1 − p)^γ * α * log(p)
+    loss = -tf.reduce_sum(a_balance * modulating_factor * tf.cast(labels, tf.float32) * log_prob, -1)
 
     var_init = tf.group(tf.global_variables_initializer(), tf.local_variables_initializer())
     with tf.Session() as sess:

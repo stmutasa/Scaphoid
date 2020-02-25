@@ -113,9 +113,6 @@ def train():
         checkpoint_interval = int((FLAGS.epoch_size / FLAGS.batch_size) * FLAGS.checkpoint_interval) + 1
         print('Max Steps: %s, Print Interval: %s, Checkpoint: %s' % (max_steps, print_interval, checkpoint_interval))
 
-        # Print Run info
-        print("*** Classification Training Run %s on GPU %s ****" % (FLAGS.RunInfo, FLAGS.GPU))
-
         # Allow memory placement growth
         config = tf.ConfigProto(log_device_placement=False, allow_soft_placement=True)
         config.gpu_options.allow_growth = True
@@ -130,6 +127,9 @@ def train():
             # Restore the model
             if ckpt and ckpt.model_checkpoint_path:
                 saver.restore(mon_sess, ckpt.model_checkpoint_path)
+
+            # Print Run info
+            print("*** Classification Training Run %s on GPU %s ****" % (FLAGS.RunInfo, FLAGS.GPU))
 
             # Initialize the handle to the summary writer in our training directory
             summary_writer = tf.summary.FileWriter(FLAGS.train_dir + FLAGS.RunInfo, mon_sess.graph)
@@ -163,16 +163,14 @@ def train():
                     if i % print_interval == 0:
 
                         # Load some metrics
-                        _lbls, _logs, _combinedLoss, _clsLoss, _locLoss, _l2loss, _totLoss, _id = mon_sess.run([
-                            labels, softmax, combined_loss, SCE_loss, loc_loss, l2loss, TOT_loss, data['view']],
+                        _lbls, _logs, _clsLoss, _l2loss, _totLoss, _id = mon_sess.run([
+                            labels, softmax, SCE_loss, l2loss, TOT_loss, data['view']],
                             feed_dict={phase_train: True})
 
                         # Make losses display in ppt
                         _totLoss *= 1e3
-                        _combinedLoss *= 1e3
                         _l2loss *= 1e3 * FLAGS.l2_gamma
                         _clsLoss *= 1e3
-                        _locLoss *= 1e3
 
                         # Positive count
                         pct = np.sum(_lbls[:, 19])
@@ -182,7 +180,7 @@ def train():
                         timer = 0
 
                         # Clip labels
-                        _lblsCls = _lbls[:, 19]
+                        _lblsCls = _lbls[:, 20]
                         _lblsCen = _lbls[:, 4:6]
                         _lblsCena = _lbls[:, 14:16]
 
@@ -197,18 +195,18 @@ def train():
 
                         # Print the data
                         print('-' * 70)
-                        print('\nEpoch %d, Losses: L2:%.3f, Comb:%.3f, Class:%.3f, Loc:%.3f,  (%.1f eg/s), Total Loss: %.3f '
-                              % (Epoch, _l2loss, _combinedLoss, _clsLoss, _locLoss, FLAGS.batch_size / elapsed, _totLoss))
+                        print('\nEpoch %d, Losses: L2:%.3f, Class:%.3f -- (%.1f eg/s), Total Loss: %.3f '
+                              % (Epoch, _l2loss, _clsLoss, FLAGS.batch_size / elapsed, _totLoss))
 
                         print('*** Pos in Batch %s of %s,  Labels/Logits: ***' % (pct, FLAGS.batch_size))
-                        for z in range(10):
-                            if FLAGS.net_type == 'RPN':
-                                print('%s -- Class Label: %s, Pred %s %s' % (
-                                _id[z], _lblsCls[z], np.argmax(_logs[0][z]), _logs[0][z]), end=' ')
-                                print ('Box Cen: %s, Anchor Cen: %s, Predicted norm Change: %s' %(_lblsCen[z], _lblsCena[z], _logs[1][z]))
-                            else:
-                                print('%s -- Class Label: %s, Pred %s %s' % (
-                                _id[z], _lblsCls[z], np.argmax(_logs[0][z]), _logs[0][z]))
+                        # for z in range(10):
+                        #     if FLAGS.net_type == 'RPN':
+                        #         print('%s -- Class Label: %s, Pred %s %s' % (
+                        #         _id[z], _lblsCls[z], np.argmax(_logs[0][z]), _logs[0][z]), end=' ')
+                        #         print ('Box Cen: %s, Anchor Cen: %s, Predicted norm Change: %s' %(_lblsCen[z], _lblsCena[z], _logs[1][z]))
+                        #     else:
+                        #         print('%s -- Class Label: %s, Pred %s %s' % (
+                        #         _id[z], _lblsCls[z], np.argmax(_logs[0][z]), _logs[0][z]))
 
                         # Run a session to retrieve our summaries
                         summary = mon_sess.run(all_summaries, feed_dict={phase_train: True})
@@ -217,7 +215,7 @@ def train():
                         summary_writer.add_summary(summary, i)
 
                         # Garbage cleanup
-                        del _lbls, _logs, _combinedLoss, _clsLoss, _locLoss, _l2loss, _totLoss, _id
+                        del _lbls, _logs, _clsLoss, _l2loss, _totLoss, _id
 
                     if i % checkpoint_interval == 0:
 
