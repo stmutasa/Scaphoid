@@ -30,10 +30,10 @@ tf.app.flags.DEFINE_integer('repeats', 20, """epochs to repeat before reloading"
 tf.app.flags.DEFINE_string('net_type', 'RPNC', """Network predicting CEN, BBOX or RPN""")
 
 # Define some of the immutable variables
-tf.app.flags.DEFINE_integer('num_epochs', 200, """Number of epochs to run""")
-tf.app.flags.DEFINE_integer('epoch_size', int(1e6), """Realy 7.7 mil studies but make epoch 1 mil""")
-tf.app.flags.DEFINE_integer('print_interval', 10, """How often to print a summary to console during training""")
-tf.app.flags.DEFINE_float('checkpoint_interval', 7.7, """How many Epochs to wait before saving a checkpoint""")
+tf.app.flags.DEFINE_integer('num_epochs', 40, """Number of epochs to run""")
+tf.app.flags.DEFINE_integer('epoch_size', int(7.7e6), """Realy 7.7 mil studies but make epoch 1 mil""")
+tf.app.flags.DEFINE_integer('print_interval', 1, """How often to print a summary to console during training""")
+tf.app.flags.DEFINE_float('checkpoint_interval', 2, """How many Epochs to wait before saving a checkpoint""")
 tf.app.flags.DEFINE_integer('batch_size', 1024, """Number of images to process in a batch.""")
 
 # Hyperparameters:
@@ -48,7 +48,7 @@ tf.app.flags.DEFINE_float('beta2', 0.999, """ The beta 1 value for the adam opti
 
 # Directory control
 tf.app.flags.DEFINE_string('train_dir', 'training/', """Directory to write event logs and save checkpoint files""")
-tf.app.flags.DEFINE_string('RunInfo', 'tester/', """Unique file name for this training run""")
+tf.app.flags.DEFINE_string('RunInfo', 'RPN_FL3/', """Unique file name for this training run""")
 tf.app.flags.DEFINE_integer('GPU', 1, """Which GPU to use""")
 
 

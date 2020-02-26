@@ -364,7 +364,7 @@ def load_protobuf(training=True):
             sdl.oversample_class(x['box_data'][19], actual_dists=[0.999, 0.001], desired_dists=[.99, .01]))
 
         # Large shuffle, repeat for xx epochs then parse the labels only
-        dataset = dataset.shuffle(buffer_size=FLAGS.epoch_size//2)
+        dataset = dataset.shuffle(buffer_size=int(5e5))
         dataset = dataset.repeat(FLAGS.repeats)
         dataset = dataset.map(_parse_all, num_parallel_calls=tf.data.experimental.AUTOTUNE)
 
@@ -480,19 +480,19 @@ class DataPreprocessor(object):
         # Create a poisson noise array
         noise = tf.random.uniform(shape=[FLAGS.network_dims, FLAGS.network_dims, 1], minval=-T_noise, maxval=T_noise)
 
-        # Normalize the image
-        image = tf.image.per_image_standardization(image)
+        # # Normalize the image
+        # image = tf.image.per_image_standardization(image)
+        # image = tf.add(image, noise)
 
         # Add the poisson noise
-        # image = tf.add(image, tf.cast(noise, tf.float16))
-        image = tf.add(image, noise)
+        image = tf.add(image, tf.cast(noise, tf.float16))
 
     else: # Validation
 
         image = tf.expand_dims(image, -1)
 
         # Normalize the image
-        image = tf.image.per_image_standardization(image)
+        # image = tf.image.per_image_standardization(image)
 
         # Resize to network size
         image = tf.image.resize_images(image, [FLAGS.network_dims, FLAGS.network_dims], tf.compat.v1.image.ResizeMethod.BICUBIC)

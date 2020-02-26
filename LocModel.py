@@ -190,7 +190,7 @@ def backward_pass(total_loss):
     gradients = opt.compute_gradients(total_loss)
 
     # clip the gradients
-    gradients = [(tf.clip_by_value(grad, -10., 10.), var) for grad, var in gradients]
+    #gradients = [(tf.clip_by_value(grad, -10., 10.), var) for grad, var in gradients]
 
     # Apply the gradients
     train_op = opt.apply_gradients(gradients, global_step, name='train')

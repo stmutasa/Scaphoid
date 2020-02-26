@@ -172,6 +172,9 @@ def test():
                     del Unique_all, Unique
                     mon_sess.close()
 
+            # Reset the default graph
+            tf.reset_default_graph()
+
 
 
 def main(argv=None):  # pylint: disable=unused-argument
