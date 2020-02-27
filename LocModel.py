@@ -138,7 +138,7 @@ def total_loss(logits, labels):
     labelsC = tf.one_hot(tf.cast(labels[:, 19], tf.uint8), depth=2, dtype=tf.uint8)
 
     # Use focal loss
-    class_loss = tf.reduce_sum(focal_softmax_cross_entropy_with_logits(labelsC, logitsC))
+    class_loss = tf.reduce_sum(focal_softmax_cross_entropy_with_logits(labelsC, logitsC, alpha=[0.5, 0.5]))
 
     # Normalize by minibatch size
     class_loss = class_loss_factor*tf.divide(class_loss, FLAGS.batch_size)

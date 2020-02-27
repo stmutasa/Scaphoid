@@ -38,7 +38,7 @@ tf.app.flags.DEFINE_float('moving_avg_decay', 0.999, """ The decay rate for the 
 # Directory control
 tf.app.flags.DEFINE_string('train_dir', 'training/', """Directory where to retrieve checkpoint files""")
 tf.app.flags.DEFINE_string('net_type', 'RPNC', """Network predicting CEN or BBOX""")
-tf.app.flags.DEFINE_string('RunInfo', 'RPN_FL_NoGC/', """Unique file name for this training run""")
+tf.app.flags.DEFINE_string('RunInfo', 'RPN_FL3/', """Unique file name for this training run""")
 tf.app.flags.DEFINE_integer('GPU', 0, """Which GPU to use""")
 
 # Define a custom training class
@@ -171,9 +171,6 @@ def test():
                     # Shut down the session
                     del Unique_all, Unique
                     mon_sess.close()
-
-            # Reset the default graph
-            tf.reset_default_graph()
 
 
 

@@ -56,17 +56,19 @@ def execute():
     # Load the files and randomly shuffle them
     filenames = sdl.retreive_filelist('dcm', True, cleanCR_folder)
     shuffle(filenames)
+    totimg = len(filenames)
 
-    print ('Found %s image files, ...starting' %len(filenames))
+    print ('Found %s image files, ...starting' %totimg)
     time.sleep(3)
 
     # Global variables
     data, index, procd =  {}, 0, 0
+    tot_props = 0
 
     for file in filenames:
 
         # Save protobuff and get epoch size
-        epoch_size = pre_proc_localizations(64, file)
+        epoch_size, ID = pre_proc_localizations(64, file)
 
         # Get factors of epoch size for batch size and return number closest to 1k
         ep_factors = factors(epoch_size)
@@ -82,14 +84,21 @@ def execute():
         # Merge dictionaries
         data.update(result_dict)
 
+        # Display
+        print ('\n *** Made %s boxes of the scaphoid from %s proposals in image %s (IMG %s of %s, Objects so far: %s)*** \n'
+               %(len(result_dict), epoch_size, ID, procd, totimg, len(data)))
+
         # Garbage and tracking
         procd += 1
+        tot_props += epoch_size
         del result_dict, iterator
 
     # Done with all patients, save
-    print('\nMade %s Object Proposal boxes from %s images.' % (index, len(filenames)))
+    print('\nMade %s Object Proposal boxes from %s images.' % (index, procd))
+    print('Avg: %s Scaphoids from %s Proposals' % (len(data)//procd, tot_props//procd))
     sdl.save_dict_filetypes(data[0], (tfrecords_dir + 'filetypes'))
-    sdl.save_tfrecords(data, 4, file_root=('%s/Final' % tfrecords_dir))
+    sdl.save_segregated_tfrecords(4, data, 'accno', file_root=('%s/Final' % tfrecords_dir))
+    sdl.save_tfrecords(data, 4, )
 
 
 
@@ -193,12 +202,11 @@ def pre_proc_localizations(box_dims, file):
     # Increment patient counters
     del image
 
-    print('\nMade %s bounding boxes from %s. %s Positive and %s Negative' % (index, dst_File, counter[1], counter[0]))
     sdl.save_dict_filetypes(data[0], (tfrecords_dir + 'filetypes'))
     sdl.save_tfrecords(data, 1, file_root=('%s/PROPS' %tfrecords_dir))
 
     del data
-    return index
+    return index, dst_File
 
 
 def load_protobuf(batch_size):
@@ -220,7 +228,6 @@ def load_protobuf(batch_size):
     # Load tfrecords
     files = sdl.retreive_filelist('tfrecords', False, path=tfrecords_dir)
     dataset = tf.data.TFRecordDataset(files, num_parallel_reads=1)
-    print('******** Loading Files: ', files)
 
     # Parse and preprocess the dataset
     dataset = dataset.map(_parse_all, num_parallel_calls=tf.data.experimental.AUTOTUNE)
@@ -305,10 +312,6 @@ def inference(iterator, epoch_size, batch_size, index):
             # Restore the model
             mon_sess.run([var_init, iterator.initializer])
             saver.restore(mon_sess, ckpt.model_checkpoint_path)
-            Epoch = ckpt.model_checkpoint_path.split('/')[-1].split('_')[-1]
-
-            # Print run info
-            print("*** Epoch %s Box Generating Run from %s on GPU %s ****" % (Epoch, FLAGS.RunInfo, FLAGS.GPU))
 
             # Initialize the step counter
             step, made = 0, False
@@ -360,9 +363,6 @@ def inference(iterator, epoch_size, batch_size, index):
                 print('Done with Training - Epoch limit reached')
 
             finally:
-
-                # Save
-                print ('%s Objects generated from %s proposals' %(len(save_dict), epoch_size))
 
                 # Shut down the session
                 mon_sess.close()
