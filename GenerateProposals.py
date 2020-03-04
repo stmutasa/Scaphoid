@@ -17,6 +17,7 @@ import LocModel as network
 from random import shuffle
 from math import sqrt
 from functools import reduce
+import matplotlib.pyplot as plt
 
 # Define the flags class for variables
 FLAGS = tf.app.flags.FLAGS
@@ -68,7 +69,8 @@ def execute():
     for file in filenames:
 
         # Save protobuff and get epoch size
-        epoch_size, ID = pre_proc_localizations(64, file)
+        try: epoch_size, ID = pre_proc_localizations(64, file)
+        except: continue
 
         # Get factors of epoch size for batch size and return number closest to 1k
         ep_factors = factors(epoch_size)
@@ -80,6 +82,24 @@ def execute():
 
         # Run the patient through
         result_dict, index = inference(iterator, epoch_size, batch_size, index)
+
+        # TODO: display box code
+        display1, display2 = [], []
+
+        # Keep only the top x proposals from the dict
+        top_n = 5
+        if len(result_dict) >= top_n:
+
+            # Double up on the positives
+            if result_dict[index-1]['box_data'][20] == 1: top_n *= 2
+
+            # Sort items by obj_prob in iterated list. Use reverse to get biggest first, take n with slicing then make dict
+            result_dict = dict(sorted(result_dict.items(), key=lambda x: x[1]['obj_prob'], reverse=True)[:top_n])
+
+            # # TODO: display box code (copy first line to above)
+            # for i, v in result_dict.items(): display2.append(np.squeeze(v['data'].astype(np.float32)))
+            # sdd.display_volume(display1)
+            # sdd.display_volume(display2, True)
 
         # Merge dictionaries
         data.update(result_dict)
@@ -123,6 +143,10 @@ def pre_proc_localizations(box_dims, file):
 
     # Load the info
     image, view, laterality, part, accno, header = Utils.filter_DICOM(file)
+
+    # Skip laterals
+    if 'LAT' in view:
+        return
 
     # Set destination filename info
     dst_File = accno + '_' + laterality + '-' + part + '_' + view
