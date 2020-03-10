@@ -10,12 +10,9 @@ import numpy as np
 import tensorflow as tf
 import SODLoader as SDL
 import SOD_Display as SDD
-from pathlib import Path
 import json
 import os
 import Utils
-
-from random import shuffle
 
 # Define the flags class for variables
 FLAGS = tf.app.flags.FLAGS
@@ -202,10 +199,10 @@ def load_protobuf(training=True):
     if training:
 
         # Define our undersample and oversample filtering functions
-        _filter_fn = lambda x: sdl.undersample_filter(x['box_data'][19], actual_dists=[0.999, 0.0012], desired_dists=[.99, .01])
+        _filter_fn = lambda x: sdl.undersample_filter(x['box_data'][19], actual_dists=[0.999, 0.00156], desired_dists=[.9, .1])
         _undersample_filter = lambda x: dataset.filter(_filter_fn)
         _oversample_filter = lambda x: tf.data.Dataset.from_tensors(x).repeat(
-            sdl.oversample_class(x['box_data'][19], actual_dists=[0.999, 0.0012], desired_dists=[.99, .01]))
+            sdl.oversample_class(x['box_data'][19], actual_dists=[0.999, 0.00156], desired_dists=[.9, .1]))
 
         # Large shuffle, repeat for xx epochs then parse the labels only
         dataset = dataset.shuffle(buffer_size=int(5e5))

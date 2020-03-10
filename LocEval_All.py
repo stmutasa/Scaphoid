@@ -28,8 +28,8 @@ tf.app.flags.DEFINE_string('data_dir', tfrecords_dir, """Path to the data direct
 tf.app.flags.DEFINE_string('training_dir', 'training/', """Path to the training directory.""")
 tf.app.flags.DEFINE_integer('box_dims', 64, """dimensions to save files""")
 tf.app.flags.DEFINE_integer('network_dims', 64, """dimensions of the network input""")
-tf.app.flags.DEFINE_integer('epoch_size', 2102384, """How many examples""")
-tf.app.flags.DEFINE_integer('batch_size', 9062, """Number of images to process in a batch.""")
+tf.app.flags.DEFINE_integer('epoch_size', 2255034, """How many examples""")
+tf.app.flags.DEFINE_integer('batch_size', 8607, """Number of images to process in a batch.""")
 
 # Hyperparameters:
 tf.app.flags.DEFINE_float('dropout_factor', 0.75, """ Keep probability""")

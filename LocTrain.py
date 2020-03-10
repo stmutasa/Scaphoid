@@ -31,10 +31,10 @@ tf.app.flags.DEFINE_string('net_type', 'RPNC', """Network predicting CEN, BBOX o
 
 # Define some of the immutable variables
 tf.app.flags.DEFINE_integer('num_epochs', 202, """Number of epochs to run""")
-tf.app.flags.DEFINE_integer('epoch_size', 10745997, """10 Million in train set""")
+tf.app.flags.DEFINE_integer('epoch_size', 19237152, """10 Million in train set""")
 tf.app.flags.DEFINE_integer('print_interval', 1, """How often to print a summary to console during training""")
-tf.app.flags.DEFINE_float('checkpoint_interval', 7.5, """How many Epochs to wait before saving a checkpoint""")
-tf.app.flags.DEFINE_integer('batch_size', 1024, """Number of images to process in a batch.""")
+tf.app.flags.DEFINE_float('checkpoint_interval', 5, """How many Epochs to wait before saving a checkpoint""")
+tf.app.flags.DEFINE_integer('batch_size', 1280, """Number of images to process in a batch.""")
 
 # Hyperparameters:
 tf.app.flags.DEFINE_float('dropout_factor', 0.75, """ Keep probability""")
@@ -102,7 +102,7 @@ def train():
         var_restore = var_ema.variables_to_restore()
 
         # Initialize the saver
-        saver = tf.train.Saver(var_restore, max_to_keep=40)
+        saver = tf.train.Saver(var_restore, max_to_keep=30)
 
         # -------------------  Session Initializer  ----------------------
 
