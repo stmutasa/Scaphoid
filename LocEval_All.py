@@ -28,8 +28,8 @@ tf.app.flags.DEFINE_string('data_dir', tfrecords_dir, """Path to the data direct
 tf.app.flags.DEFINE_string('training_dir', 'training/', """Path to the training directory.""")
 tf.app.flags.DEFINE_integer('box_dims', 64, """dimensions to save files""")
 tf.app.flags.DEFINE_integer('network_dims', 64, """dimensions of the network input""")
-tf.app.flags.DEFINE_integer('epoch_size', 2449062, """How many examples""")
-tf.app.flags.DEFINE_integer('batch_size', 5301, """Number of images to process in a batch.""")
+tf.app.flags.DEFINE_integer('epoch_size', 2102384, """How many examples""")
+tf.app.flags.DEFINE_integer('batch_size', 9062, """Number of images to process in a batch.""")
 
 # Hyperparameters:
 tf.app.flags.DEFINE_float('dropout_factor', 0.75, """ Keep probability""")
@@ -38,7 +38,7 @@ tf.app.flags.DEFINE_float('moving_avg_decay', 0.999, """ The decay rate for the 
 # Directory control
 tf.app.flags.DEFINE_string('train_dir', 'training/', """Directory where to retrieve checkpoint files""")
 tf.app.flags.DEFINE_string('net_type', 'RPNC', """Network predicting CEN or BBOX""")
-tf.app.flags.DEFINE_string('RunInfo', 'RPN_FL5/', """Unique file name for this training run""")
+tf.app.flags.DEFINE_string('RunInfo', 'RPN_FL6/', """Unique file name for this training run""")
 tf.app.flags.DEFINE_integer('GPU', 1, """Which GPU to use""")
 
 # Define a custom training class
@@ -79,7 +79,7 @@ def test():
         saver = tf.train.Saver(var_restore, max_to_keep=3)
 
         # Trackers for best performers
-        best_SN, best_epoch = 0.1, 0
+        best_score, best_epoch = 0.1, 0
 
         # Tester instance
         sdt = SDT.SODTester(False, True)
@@ -162,10 +162,18 @@ def test():
                     pct_Unq = 100 * Unique.shape[0] / (Unique_all.shape[0] + 1e-8)
                     try: ucnts = np.argmin(Counts)
                     except: ucnts = 'Error'
+
+                    # Best score
+                    score = (SN + SP) /2
+                    if score >= best_score:
+                        best_score = score
+                        best_epoch = Epoch
+
+                    # Print
                     print('\n*** Sn:%.3f, Sp:%.3f, PPv:%.3f, NPv:%.3f ***' % (SN, SP, PPV, NPV))
                     print('*** Acc:%.2f TP:%s, TN:%s, FP:%s, FN:%s ***' % (Acc, TP, TN, FP, FN))
                     print("Epoch:%s (Best %s-%.3f), Accnos with True Positives: %s of %s (%s%% - As little as %s)\n" %
-                          (Epoch, best_epoch, best_SN, Unique.shape[0], Unique_all.shape[0], pct_Unq, ucnts))
+                          (Epoch, best_epoch, best_score, Unique.shape[0], Unique_all.shape[0], pct_Unq, ucnts))
                     sdt.MAE = SN
 
                     # Shut down the session

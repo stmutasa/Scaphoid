@@ -161,17 +161,20 @@ def pre_proc_localizations(box_dims, file):
     # Normalize image
     image = sdl.adaptive_normalization(image).astype(np.float32)
 
-    """
-    Generate the anchor boxes here
-    Base; [.118, .153] or [129.4, 127.7], Scales: [0.68, 1.0, 1.3], Ratios [0.82, 1.05, 1.275]
-    Feature stride of 16 
-    """
-
     # Shuttle image to GPU
     #image = cp.asarray(image)
 
-    # Generate anchors
-    anchors = gut.generate_anchors(image, [129.4, 127.7], 16, ratios=[0.82, 1.05, 1.275], scales=[0.68, 1.0, 1.3])
+    """
+        Generate the anchor boxes here depending on wrist or hand XR
+        Interestingly, base it off the original size of the bbox as normalized size varies much more
+    """
+    if 'WRIST' in part:
+        sh, sw, rat, ratSD, scaSD = 125.8, 122.2, 1.06, 0.232 * 1.25, (19.5 / 125.8 + 24.18 / 122.2) / 2
+    else:
+        sh, sw, rat, ratSD, scaSD = 122.3, 127.7, 0.98, 0.196 * 1.25, (17.1 / 122.3 + 24.3 / 127.7) / 2
+
+    anchors = Utils.generate_anchors(image, [sh, sw], 16, ratios=[rat - ratSD, rat, rat + ratSD],
+                                     scales=[1 - scaSD, 1.0, 1 + scaSD])
 
     # Generate a dummy GT Box
     ms = image.shape

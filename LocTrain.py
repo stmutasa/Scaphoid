@@ -30,10 +30,10 @@ tf.app.flags.DEFINE_integer('repeats', 20, """epochs to repeat before reloading"
 tf.app.flags.DEFINE_string('net_type', 'RPNC', """Network predicting CEN, BBOX or RPN""")
 
 # Define some of the immutable variables
-tf.app.flags.DEFINE_integer('num_epochs', 200, """Number of epochs to run""")
-tf.app.flags.DEFINE_integer('epoch_size', int(7.7e6), """Realy 7.7 mil studies but make epoch 1 mil""")
+tf.app.flags.DEFINE_integer('num_epochs', 202, """Number of epochs to run""")
+tf.app.flags.DEFINE_integer('epoch_size', 10745997, """10 Million in train set""")
 tf.app.flags.DEFINE_integer('print_interval', 1, """How often to print a summary to console during training""")
-tf.app.flags.DEFINE_float('checkpoint_interval', 5, """How many Epochs to wait before saving a checkpoint""")
+tf.app.flags.DEFINE_float('checkpoint_interval', 7.5, """How many Epochs to wait before saving a checkpoint""")
 tf.app.flags.DEFINE_integer('batch_size', 1024, """Number of images to process in a batch.""")
 
 # Hyperparameters:
@@ -48,7 +48,7 @@ tf.app.flags.DEFINE_float('beta2', 0.999, """ The beta 1 value for the adam opti
 
 # Directory control
 tf.app.flags.DEFINE_string('train_dir', 'training/', """Directory to write event logs and save checkpoint files""")
-tf.app.flags.DEFINE_string('RunInfo', 'RPN_FL5/', """Unique file name for this training run""")
+tf.app.flags.DEFINE_string('RunInfo', 'RPN_FL6/', """Unique file name for this training run""")
 tf.app.flags.DEFINE_integer('GPU', 0, """Which GPU to use""")
 
 
@@ -61,7 +61,7 @@ def train():
         phase_train = tf.placeholder(tf.bool)
 
         # Load the images and labels.
-        iterator = network.inputs(training=True, skip=True)
+        iterator = network.inputs(training=True, skip=False)
         data = iterator.get_next()
 
         # Define input shape
@@ -102,7 +102,7 @@ def train():
         var_restore = var_ema.variables_to_restore()
 
         # Initialize the saver
-        saver = tf.train.Saver(var_restore, max_to_keep=20)
+        saver = tf.train.Saver(var_restore, max_to_keep=40)
 
         # -------------------  Session Initializer  ----------------------
 
@@ -194,7 +194,7 @@ def train():
                               % (Epoch, _l2loss, _combinedLoss, _clsLoss, _locLoss, FLAGS.batch_size / elapsed, _totLoss))
 
                         print('*** Pos in Batch %s of %s,  Labels/Logits: ***' % (pct, FLAGS.batch_size))
-                        for z in range(10):
+                        for z in range(0, 1000, 100):
                             if FLAGS.net_type == 'RPN':
                                 print('%s -- Class Label: %s, Pred %s %s' % (
                                 _id[z], _lblsCls[z], np.argmax(_logs[0][z]), _logs[0][z]), end=' ')

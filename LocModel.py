@@ -179,7 +179,7 @@ def backward_pass(total_loss):
 
     # Decay the learning rate
     #dk_steps = int((FLAGS.epoch_size / FLAGS.batch_size) * (FLAGS.num_epochs/4))
-    dk_steps = int((FLAGS.epoch_size / FLAGS.batch_size) * 15)
+    dk_steps = int((FLAGS.epoch_size / FLAGS.batch_size) * 25)
     lr_decayed = tf.train.cosine_decay_restarts(FLAGS.learning_rate, global_step, dk_steps)
 
     # Compute the gradients. NAdam optimizer came in tensorflow 1.2
@@ -221,7 +221,7 @@ def inputs(training=True, skip=False):
     :return:
     """
 
-    if not skip:  Input.pre_proc_localizations(FLAGS.box_dims, thresh=0.4)
+    if not skip:  Input.pre_proc_localizations(FLAGS.box_dims, thresh=0.6)
 
     else: print('-------------------------Previously saved records found! Loading...')
 
