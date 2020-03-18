@@ -20,7 +20,7 @@ FLAGS = tf.app.flags.FLAGS
 # Define the data directory to use
 home_dir = str(Path.home()) + '/Code/Datasets/Scaphoid/'
 
-rawCR_dir = home_dir + 'Raw_Scaphoid_CR/'
+rawCR_dir = home_dir + 'RAW_CR/'
 test_loc_folder = home_dir + 'Test/'
 cleanCR_folder = home_dir + 'Cleaned_CR_Single/'
 
@@ -42,85 +42,12 @@ def process_raw():
 
     # Global variables
     display, counter, skipped, data_test, index, pt = [], [0, 0], [], {}, 0, 0
-    saved = []
 
     for file in filenames:
 
-        # Load the Dicom
-        try:
-            img, _, _, _, header = sdl.load_DICOM_2D(file)
-        except Exception as e:
-            #print('DICOM Error: %s' %e)
-            continue
-
-        # Retreive the view information. Only body part fail will fail us
-        view, laterality, part, accno = 0, 0, 0, 0
-
-        # Laterality: L, R or UK
-        try:laterality = header['tags'].ImageLaterality.upper()
-        except:
-            try:laterality = header['tags'].Laterality.upper()
-            except:
-                try:
-                    if 'LEFT' in header['tags'].StudyDescription.upper():laterality = 'L'
-                    else: laterality = 'R'
-                except:
-                    try:
-                        if 'LEFT' in header['tags'].SeriesDescription.upper():laterality = 'L'
-                        else:laterality = 'R'
-                    except: laterality = 'UKLAT'
-
-        # Accession number
-        try:
-            dir = os.path.dirname(file)
-            accno = dir.split('/')[-2]
-        except:
-            try: accno = header['tags'].StudyID
-            except:
-                try: accno = header['tags'].AccessionNumber
-                except Exception as e:
-                    print('Header error: %s' % e)
-                    continue
-
-        # View 'LAT, PA, OBL, TAN. Maybe use SeriesNumber 1 = PA, 2 = LAT if 2 views etc
-        try: view = header['tags'].ViewPosition.upper()
-        except:
-            try: view = 'V' + str(header['tags'].SeriesNumber)
-            except: view = 'UKVIEW'
-
-        if not view:
-            try: view = 'V' + header['tags'].SeriesNumber
-            except: view = 'UKVIEW'
-
-        # PART: WRIST, HAND
-        try:
-            if 'WRIST' in header['tags'].StudyDescription.upper():
-                part = 'WRIST'
-            elif 'HAND' in header['tags'].StudyDescription.upper():
-                part = 'HAND'
-            elif 'WRIST' in header['tags'].SeriesDescription.upper():
-                part = 'WRIST'
-            elif 'HAND' in header['tags'].SeriesDescription.upper():
-                part = 'HAND'
-            else:
-                part = 'UKPART'
-        except:
-            try:
-                part = header['tags'].BodyPartExamined.upper()
-            except Exception as e:
-                print('Header error: %s' % e)
-                continue
-
-        """
-            Some odd values that appear:
-            view: TAN, LATERAL, NAVICULAR, LLO
-            part: PORT WRIST, 
-        """
-
-        # Sometimes lateraity is off
-        if laterality != 'L' and laterality != 'R':
-            if 'RIGHT' in header['tags'].StudyDescription.upper(): laterality = 'R'
-            elif 'LEFT' in header['tags'].StudyDescription.upper(): laterality = 'L'
+        # Retreive the view information.
+        try: img, view, laterality, part, accno, header = filter_DICOM(file)
+        except: continue
 
         # Get instance number from number in this folder with these accnos
         savedir = (save_path + accno + '/')
@@ -138,12 +65,10 @@ def process_raw():
         # Filename
         savefile = savedir + dst_File + '.dcm'
         if not os.path.exists(savedir): os.makedirs(savedir)
-        #savefile = save_path + dst_File + '.dcm'
 
         # Copy to the destination folder
         shutil.copyfile(file, savefile)
-        #if index % 10 == 0 and index > 1:
-        print('Saving pt %s of %s to dest: %s' % (index, len(filenames), dst_File))
+        if index % 10 == 0 and index > 1: print('Saving pt %s of %s to dest: %s' % (index, len(filenames), dst_File))
 
         # Increment counters
         index += 1
@@ -353,7 +278,8 @@ def filter_DICOM(file, show_debug=False):
 
     # Load the Dicom
     try:
-        img, _, _, _, header = sdl.load_DICOM_2D(file)
+        img, _, _, photo, header = sdl.load_DICOM_2D(file)
+        if photo == 1: img *= -1
     except Exception as e:
         if show_debug: print('DICOM Error: %s' %e)
         return
@@ -397,9 +323,9 @@ def filter_DICOM(file, show_debug=False):
             dir = os.path.dirname(file)
             accno = dir.split('/')[-3]
 
-    # View 'LAT, PA, OBL, TAN. Maybe use SeriesNumber 1 = PA, 2 = LAT if 2 views etc
+    # View 'LAT, PA, OBL, TAN. Only secondary captures lack views
     try: view = header['tags'].ViewPosition.upper()
-    except: view = 'UKVIEW'
+    except: return
 
     # PART: WRIST, HAND
     try:
@@ -753,4 +679,4 @@ def _filter_outside_anchors(anchors, img_dim):
 
     return valid_anchors
 
-#check_stats2()
+# process_raw()

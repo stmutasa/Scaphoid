@@ -27,7 +27,8 @@ home_dir = '/home/stmutasa/Code/Datasets/Scaphoid/'
 tfrecords_dir = home_dir + 'tfrecords/temp/'
 
 test_loc_folder = home_dir + 'Test/'
-cleanCR_folder = home_dir + 'Cleaned_CR_Single/'
+cleanCR_folder = home_dir + 'Cleaned_CR/'
+label_folder = home_dir + 'Labels/'
 
 sdl = SDL.SODLoader(data_root=home_dir)
 sdd = SDD.SOD_Display()
@@ -45,31 +46,43 @@ tf.app.flags.DEFINE_float('moving_avg_decay', 0.999, """ The decay rate for the 
 # Directory control
 tf.app.flags.DEFINE_string('train_dir', 'training/', """Directory where to retrieve checkpoint files""")
 tf.app.flags.DEFINE_string('net_type', 'RPNC', """Network predicting CEN or BBOX""")
-tf.app.flags.DEFINE_string('RunInfo', 'RPN_FL2/', """Unique file name for this training run""")
+tf.app.flags.DEFINE_string('RunInfo', 'RPN_FL6/', """Unique file name for this training run""")
 tf.app.flags.DEFINE_integer('GPU', 0, """Which GPU to use""")
 
 def execute():
+
     """
     loads the raw images. Generates anchors, Runs anchors, Filters anchors, Saves outputs
     :return:
     """
 
-    # Load the files and randomly shuffle them
+    # Load the labels and files and randomly shuffle them
+    labels = sdl.load_CSV_Dict('Accno', path=label_folder + 'Test_Lbls.csv')
+    labels.update(sdl.load_CSV_Dict('Accno', path=label_folder + 'Test_Lbls_EZ.csv'))
     filenames = sdl.retreive_filelist('dcm', True, cleanCR_folder)
     shuffle(filenames)
     totimg = len(filenames)
-
-    print ('Found %s image files, ...starting' %totimg)
+    print ('Found %s image files and %s test labels, ...starting' %(totimg, len(labels)))
     time.sleep(3)
 
+    # Load the labels
+    Train_labels = sdl.load_CSV_Dict('Accno', path=label_folder + 'Train_Lbls.csv')
+
     # Global variables
-    data, index, procd =  {}, 0, 0
+    data, index, procd, counter =  {}, 0, 0, [0, 0]
     tot_props = 0
 
     for file in filenames:
 
+        # Skip if the this is a test file
+        test_acc = file.split('/')[-2]
+        try:
+            _ = labels[test_acc]
+            continue
+        except: pass
+
         # Save protobuff and get epoch size
-        try: epoch_size, ID = pre_proc_localizations(64, file)
+        try: epoch_size, ID, cls = pre_proc_localizations(64, file, Train_labels)
         except: continue
 
         # Get factors of epoch size for batch size and return number closest to 1k
@@ -83,9 +96,6 @@ def execute():
         # Run the patient through
         result_dict, index = inference(iterator, epoch_size, batch_size, index)
 
-        # TODO: display box code
-        display1, display2 = [], []
-
         # Keep only the top x proposals from the dict
         top_n = 5
         if len(result_dict) >= top_n:
@@ -96,17 +106,20 @@ def execute():
             # Sort items by obj_prob in iterated list. Use reverse to get biggest first, take n with slicing then make dict
             result_dict = dict(sorted(result_dict.items(), key=lambda x: x[1]['obj_prob'], reverse=True)[:top_n])
 
-            # # TODO: display box code (copy first line to above)
-            # for i, v in result_dict.items(): display2.append(np.squeeze(v['data'].astype(np.float32)))
-            # sdd.display_volume(display1)
-            # sdd.display_volume(display2, True)
+            # # TODO: display box code
+            # display = []
+            # for i, v in result_dict.items(): display.append(np.squeeze(v['data'].astype(np.float32)))
+            # sdd.display_volume(display, True)
 
         # Merge dictionaries
         data.update(result_dict)
 
+        # Update count
+        counter[cls] += len(result_dict)
+
         # Display
         print ('\n *** Made %s boxes of the scaphoid from %s proposals in image %s (IMG %s of %s, Objects so far: %s)*** \n'
-               %(len(result_dict), epoch_size, ID, procd, totimg, len(data)))
+               %(len(result_dict), epoch_size, ID, procd, totimg, counter))
 
         # Garbage and tracking
         procd += 1
@@ -117,9 +130,7 @@ def execute():
     print('\nMade %s Object Proposal boxes from %s images.' % (index, procd))
     print('Avg: %s Scaphoids from %s Proposals' % (len(data)//procd, tot_props//procd))
     sdl.save_dict_filetypes(data[0], (tfrecords_dir + 'filetypes'))
-    sdl.save_segregated_tfrecords(4, data, 'accno', file_root=('%s/Final' % tfrecords_dir))
-    sdl.save_tfrecords(data, 4, )
-
+    sdl.save_segregated_tfrecords(5, data, 'accno', file_root=('%s/Objects' % tfrecords_dir))
 
 
 def factors(n):
@@ -128,7 +139,7 @@ def factors(n):
                     ([i, n//i] for i in range(1, int(sqrt(n))+1, step) if n % i == 0)))
 
 
-def pre_proc_localizations(box_dims, file):
+def pre_proc_localizations(box_dims, file, labels):
 
     """
     Pre processes the input for the classification
@@ -150,6 +161,12 @@ def pre_proc_localizations(box_dims, file):
 
     # Set destination filename info
     dst_File = accno + '_' + laterality + '-' + part + '_' + view
+
+    # Get the label
+    try: fracture_class = int(labels[accno]['Lbl'])
+    except:
+        print('Cant find label for ', dst_File)
+        return
 
     # Retreive photometric interpretation (1 = negative XRay) if available
     try:
@@ -173,7 +190,7 @@ def pre_proc_localizations(box_dims, file):
     else:
         sh, sw, rat, ratSD, scaSD = 122.3, 127.7, 0.98, 0.196 * 1.25, (17.1 / 122.3 + 24.3 / 127.7) / 2
 
-    anchors = Utils.generate_anchors(image, [sh, sw], 16, ratios=[rat - ratSD, rat, rat + ratSD],
+    anchors = Utils.generate_anchors(image, [sh, sw], 10, ratios=[rat - ratSD, rat, rat + ratSD],
                                      scales=[1 - scaSD, 1.0, 1 + scaSD])
 
     # Generate a dummy GT Box
@@ -207,10 +224,8 @@ def pre_proc_localizations(box_dims, file):
         # Append the anchor to the norm box
         box_data = cp.append(norm_gtbox, anchor)
 
-        # Make object and fracture labels TODO:
-        fracture_class = index % 2
-        object_class = 1
-        counter[fracture_class] += 1
+        # Make object and fracture labels
+        object_class = 0
 
         # Append object class and fracture class to box data
         box_data = cp.append(box_data, [object_class, fracture_class]).astype(cp.float32)
@@ -233,7 +248,7 @@ def pre_proc_localizations(box_dims, file):
     sdl.save_tfrecords(data, 1, file_root=('%s/PROPS' %tfrecords_dir))
 
     del data
-    return index, dst_File
+    return index, dst_File, fracture_class
 
 
 def load_protobuf(batch_size):
@@ -284,8 +299,8 @@ class DataPreprocessor(object):
     image = record['data']
     image = tf.expand_dims(image, -1)
 
-    # Normalize the image
-    image = tf.image.per_image_standardization(image)
+    # # Normalize the image
+    # image = tf.image.per_image_standardization(image)
 
     # Resize to network size
     image = tf.image.resize_images(image, [FLAGS.network_dims, FLAGS.network_dims], tf.compat.v1.image.ResizeMethod.BICUBIC)

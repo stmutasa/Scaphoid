@@ -39,7 +39,7 @@ tf.app.flags.DEFINE_float('moving_avg_decay', 0.999, """ The decay rate for the 
 tf.app.flags.DEFINE_string('train_dir', 'training/', """Directory where to retrieve checkpoint files""")
 tf.app.flags.DEFINE_string('net_type', 'RPNC', """Network predicting CEN or BBOX""")
 tf.app.flags.DEFINE_string('RunInfo', 'RPN_FL2/', """Unique file name for this training run""")
-tf.app.flags.DEFINE_integer('GPU', 0, """Which GPU to use""")
+tf.app.flags.DEFINE_integer('GPU', 1, """Which GPU to use""")
 
 # Define a custom training class
 def test():

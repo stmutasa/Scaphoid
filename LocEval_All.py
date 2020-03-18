@@ -29,7 +29,7 @@ tf.app.flags.DEFINE_string('training_dir', 'training/', """Path to the training 
 tf.app.flags.DEFINE_integer('box_dims', 64, """dimensions to save files""")
 tf.app.flags.DEFINE_integer('network_dims', 64, """dimensions of the network input""")
 tf.app.flags.DEFINE_integer('epoch_size', 2255034, """How many examples""")
-tf.app.flags.DEFINE_integer('batch_size', 8607, """Number of images to process in a batch.""")
+tf.app.flags.DEFINE_integer('batch_size', 7468, """Number of images to process in a batch.""")
 
 # Hyperparameters:
 tf.app.flags.DEFINE_float('dropout_factor', 0.75, """ Keep probability""")
@@ -183,6 +183,7 @@ def test():
 
 
 def main(argv=None):  # pylint: disable=unused-argument
+    # time.sleep(3600*9)
     test()
 
 if __name__ == '__main__':

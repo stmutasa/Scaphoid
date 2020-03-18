@@ -49,7 +49,7 @@ tf.app.flags.DEFINE_float('beta2', 0.999, """ The beta 1 value for the adam opti
 # Directory control
 tf.app.flags.DEFINE_string('train_dir', 'training/', """Directory to write event logs and save checkpoint files""")
 tf.app.flags.DEFINE_string('RunInfo', 'RPN_FL6/', """Unique file name for this training run""")
-tf.app.flags.DEFINE_integer('GPU', 0, """Which GPU to use""")
+tf.app.flags.DEFINE_integer('GPU', 1, """Which GPU to use""")
 
 
 def train():
@@ -61,7 +61,7 @@ def train():
         phase_train = tf.placeholder(tf.bool)
 
         # Load the images and labels.
-        iterator = network.inputs(training=True, skip=False)
+        iterator = network.inputs(training=True, skip=True)
         data = iterator.get_next()
 
         # Define input shape
@@ -73,10 +73,10 @@ def train():
 
         # Labels and logits
         labels = data['box_data']
+        logits = tf.nn.softmax(all_logits[0])
 
         # Calculate loss
         combined_loss, class_loss, loc_loss = network.total_loss(all_logits, labels)
-        all_logits_dsp = (tf.nn.softmax(all_logits[0]), all_logits[1])
 
         # Add the L2 regularization loss
         loss = tf.add(combined_loss, l2loss, name='TotalLoss')
@@ -124,6 +124,12 @@ def train():
             mon_sess.run(var_init)
             mon_sess.run(iterator.initializer)
 
+            # TODO: Restore the model
+            ckpt = tf.train.get_checkpoint_state(FLAGS.train_dir + FLAGS.RunInfo)
+            saver.restore(mon_sess, ckpt.model_checkpoint_path)
+            print ('Model restored: ', ckpt.model_checkpoint_path)
+            start_step = 751451
+
             # Initialize the handle to the summary writer in our training directory
             summary_writer = tf.summary.FileWriter(FLAGS.train_dir + FLAGS.RunInfo, mon_sess.graph)
 
@@ -134,7 +140,8 @@ def train():
             mon_sess.graph.finalize()
 
             # No queues!
-            for i in range(max_steps):
+            # for i in range(max_steps):
+            for i in range(start_step, max_steps, 1):
 
                 # Run and time an iteration
                 start = time.time()
@@ -157,7 +164,7 @@ def train():
 
                         # Load some metrics
                         _lbls, _logs, _combinedLoss, _clsLoss, _locLoss, _l2loss, _totLoss, _id = mon_sess.run([
-                            labels, all_logits_dsp, combined_loss, class_loss, loc_loss, l2loss, loss, data['view']],
+                            labels, logits, combined_loss, class_loss, loc_loss, l2loss, loss, data['view']],
                             feed_dict={phase_train: True})
 
                         # Make losses display in ppt
@@ -170,14 +177,26 @@ def train():
                         # Positive count
                         pct = np.sum(_lbls[:, 19])
 
+                        # Retreive the indices
+                        class_preds = np.argmax(_logs, axis=1)
+
+                        # Get metrics for this batch:
+                        TP = np.sum(np.logical_and(class_preds == 1, _lbls[:, 19] == 1))
+                        TN = np.sum(np.logical_and(class_preds == 0, _lbls[:, 19] == 0))
+                        FP = np.sum(np.logical_and(class_preds == 1, _lbls[:, 19] == 0))
+                        FN = np.sum(np.logical_and(class_preds == 0, _lbls[:, 19] == 1))
+
+                        # Calculate stats
+                        SN, SP = TP / (TP + FN), TN / (TN + FP)
+                        PPV, NPV = TP / (TP + FP), TN / (TN + FN)
+                        Acc = 100 * (TP + TN) / (TN + TP + FN + FP)
+
                         # Get timing stats
                         elapsed = timer / print_interval
                         timer = 0
 
                         # Clip labels
                         _lblsCls = _lbls[:, 19]
-                        _lblsCen = _lbls[:, 4:6]
-                        _lblsCena = _lbls[:, 14:16]
 
                         # use numpy to print only the first sig fig
                         np.set_printoptions(precision=3, suppress=True, linewidth=150)
@@ -193,15 +212,15 @@ def train():
                         print('\nEpoch %d, Losses: L2:%.3f, Comb:%.3f, Class:%.3f, Loc:%.3f,  (%.1f eg/s), Total Loss: %.3f '
                               % (Epoch, _l2loss, _combinedLoss, _clsLoss, _locLoss, FLAGS.batch_size / elapsed, _totLoss))
 
+                        # Print the stats
+                        print('*** Sn:%.3f, Sp:%.3f, PPv:%.3f, NPv:%.3f ***' % (SN, SP, PPV, NPV))
+                        print('*** Acc:%.2f TP:%s, TN:%s, FP:%s, FN:%s ***' % (Acc, TP, TN, FP, FN))
+
+                        # Print examples
                         print('*** Pos in Batch %s of %s,  Labels/Logits: ***' % (pct, FLAGS.batch_size))
                         for z in range(0, 1000, 100):
-                            if FLAGS.net_type == 'RPN':
-                                print('%s -- Class Label: %s, Pred %s %s' % (
-                                _id[z], _lblsCls[z], np.argmax(_logs[0][z]), _logs[0][z]), end=' ')
-                                print ('Box Cen: %s, Anchor Cen: %s, Predicted norm Change: %s' %(_lblsCen[z], _lblsCena[z], _logs[1][z]))
-                            else:
-                                print('%s -- Class Label: %s, Pred %s %s' % (
-                                _id[z], _lblsCls[z], np.argmax(_logs[0][z]), _logs[0][z]))
+                            print('%s -- Class Label: %s, Pred %s %s' % (
+                            _id[z], _lblsCls[z], np.argmax(_logs[z]), _logs[z]))
 
                         # Run a session to retrieve our summaries
                         summary = mon_sess.run(all_summaries, feed_dict={phase_train: True})
@@ -235,9 +254,9 @@ def train():
 
 
 def main(argv=None):
-    if tf.gfile.Exists(FLAGS.train_dir + FLAGS.RunInfo):
-        tf.gfile.DeleteRecursively(FLAGS.train_dir + FLAGS.RunInfo)
-    tf.gfile.MakeDirs(FLAGS.train_dir + FLAGS.RunInfo)
+    # if tf.gfile.Exists(FLAGS.train_dir + FLAGS.RunInfo):
+    #     tf.gfile.DeleteRecursively(FLAGS.train_dir + FLAGS.RunInfo)
+    # tf.gfile.MakeDirs(FLAGS.train_dir + FLAGS.RunInfo)
     train()
 
 
