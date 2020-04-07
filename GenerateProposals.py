@@ -28,6 +28,7 @@ tfrecords_dir = home_dir + 'tfrecords/temp/'
 
 test_loc_folder = home_dir + 'Test/'
 cleanCR_folder = home_dir + 'Cleaned_CR/'
+hedgeCR_folder = home_dir + 'Cleaned_CR_Hedge/'
 label_folder = home_dir + 'Labels/'
 
 sdl = SDL.SODLoader(data_root=home_dir)
@@ -47,7 +48,8 @@ tf.app.flags.DEFINE_float('moving_avg_decay', 0.999, """ The decay rate for the 
 tf.app.flags.DEFINE_string('train_dir', 'training/', """Directory where to retrieve checkpoint files""")
 tf.app.flags.DEFINE_string('net_type', 'RPNC', """Network predicting CEN or BBOX""")
 tf.app.flags.DEFINE_string('RunInfo', 'RPN_FL6/', """Unique file name for this training run""")
-tf.app.flags.DEFINE_integer('GPU', 0, """Which GPU to use""")
+tf.app.flags.DEFINE_integer('GPU', 1, """Which GPU to use""")
+
 
 def execute():
 
@@ -129,8 +131,161 @@ def execute():
     # Done with all patients, save
     print('\nMade %s Object Proposal boxes from %s images.' % (index, procd))
     print('Avg: %s Scaphoids from %s Proposals' % (len(data)//procd, tot_props//procd))
-    sdl.save_dict_filetypes(data[0], (tfrecords_dir + 'filetypes'))
-    sdl.save_segregated_tfrecords(5, data, 'accno', file_root=('%s/Objects' % tfrecords_dir))
+    sdl.save_dict_filetypes(data[next(iter(data))], (tfrecords_dir + 'filetypes'))
+    sdl.save_segregated_tfrecords(5, data, 'accno', file_root=('%sObjects' % tfrecords_dir))
+
+
+def execute_hedge():
+
+    """
+    loads the raw images. Generates anchors, Runs anchors, Filters anchors, Saves outputs
+    :return:
+    """
+
+    # Load the labels and files and randomly shuffle them
+    labels = sdl.load_CSV_Dict('Accno', path=label_folder + 'Test_Lbls.csv')
+    labels.update(sdl.load_CSV_Dict('Accno', path=label_folder + 'Test_Lbls_EZ.csv'))
+    filenames = sdl.retreive_filelist('dcm', True, hedgeCR_folder)
+    shuffle(filenames)
+    totimg = len(filenames)
+    print ('Found %s image files and %s test labels, ...starting' %(totimg, len(labels)))
+    time.sleep(3)
+
+    # Load the labels
+    Train_labels = sdl.load_CSV_Dict('Accno', path=label_folder + 'Train_Lbls.csv')
+
+    # Global variables
+    data, index, procd, counter =  {}, 0, 0, [0, 0]
+    tot_props = 0
+
+    for file in filenames:
+
+        # Skip if the this is a test file
+        test_acc = file.split('/')[-2]
+        try:
+            _ = labels[test_acc]
+            continue
+        except: pass
+
+        # Save protobuff and get epoch size
+        try: epoch_size, ID, cls = pre_proc_localizations(64, file, Train_labels)
+        except: continue
+
+        # Get factors of epoch size for batch size and return number closest to 1k
+        ep_factors = factors(epoch_size)
+        batch_size = min(ep_factors, key=lambda x: abs(x - 3000))
+        if batch_size < 100 or batch_size > 6000: batch_size = 100
+
+        # Load this patient
+        iterator = load_protobuf(batch_size)
+
+        # Run the patient through
+        result_dict, index = inference(iterator, epoch_size, batch_size, index)
+
+        # Keep only the top x proposals from the dict. TODO: Triple represent hedges
+        top_n = 15
+        if len(result_dict) >= top_n:
+
+            # Double up on the positives
+            if result_dict[index-1]['box_data'][20] == 1: top_n *= 2
+
+            # Sort items by obj_prob in iterated list. Use reverse to get biggest first, take n with slicing then make dict
+            result_dict = dict(sorted(result_dict.items(), key=lambda x: x[1]['obj_prob'], reverse=True)[:top_n])
+
+        # Merge dictionaries
+        data.update(result_dict)
+
+        # Update count
+        counter[cls] += len(result_dict)
+
+        # Display
+        print ('\n *** Made %s Hedged boxes of the scaphoid from %s proposals in image %s (IMG %s of %s, Objects so far: %s)*** \n'
+               %(len(result_dict), epoch_size, ID, procd, totimg, counter))
+
+        # Garbage and tracking
+        procd += 1
+        tot_props += epoch_size
+        del result_dict, iterator
+
+    # Done with all patients, save
+    print('\nMade %s Object Proposal boxes from %s images.' % (index, procd))
+    print('Avg: %s Hedged Scaphoids from %s Proposals' % (len(data)//procd, tot_props//procd))
+    sdl.save_segregated_tfrecords(2, data, 'accno', file_root=('%sHedge' % tfrecords_dir))
+
+
+def execute_Test():
+
+    """
+    loads the raw images. Generates anchors, Runs anchors, Filters anchors, Saves outputs
+    :return:
+    """
+
+    # Load the labels and files and randomly shuffle them
+    labels = sdl.load_CSV_Dict('Accno', path=label_folder + 'Test_Lbls.csv')
+    labels.update(sdl.load_CSV_Dict('Accno', path=label_folder + 'Test_Lbls_EZ.csv'))
+    filenames = sdl.retreive_filelist('dcm', True, cleanCR_folder)
+    shuffle(filenames)
+    totimg = len(filenames)
+    print ('Found %s image files and %s test labels, ...starting' %(totimg, len(labels)))
+    time.sleep(3)
+
+    # Load the labels
+    Train_labels = sdl.load_CSV_Dict('Accno', path=label_folder + 'Train_Lbls.csv')
+
+    # Global variables
+    data, index, procd, counter =  {}, 0, 0, [0, 0]
+    tot_props = 0
+
+    for file in filenames:
+
+        # Skip if the this is NOT a test file
+        test_acc = file.split('/')[-2]
+        try:
+            _ = labels[test_acc]
+            pass
+        except: continue
+
+        # Save protobuff and get epoch size
+        try: epoch_size, ID, cls = pre_proc_localizations(64, file, labels)
+        except: continue
+
+        # Get factors of epoch size for batch size and return number closest to 1k
+        ep_factors = factors(epoch_size)
+        batch_size = min(ep_factors, key=lambda x: abs(x - 3000))
+        if batch_size < 100 or batch_size > 6000: batch_size = 100
+
+        # Load this patient
+        iterator = load_protobuf(batch_size)
+
+        # Run the patient through
+        result_dict, index = inference(iterator, epoch_size, batch_size, index)
+
+        # Keep only the top x proposals from the dict
+        top_n = 5
+        if len(result_dict) >= top_n:
+
+            # Sort items by obj_prob in iterated list. Use reverse to get biggest first, take n with slicing then make dict
+            result_dict = dict(sorted(result_dict.items(), key=lambda x: x[1]['obj_prob'], reverse=True)[:top_n])
+
+        # Merge dictionaries
+        data.update(result_dict)
+
+        # Update count
+        counter[cls] += len(result_dict)
+
+        # Display
+        print ('\n *** Made %s boxes of the scaphoid from %s proposals in image %s (IMG %s of %s, Objects so far: %s)*** \n'
+               %(len(result_dict), epoch_size, ID, procd, totimg, counter))
+
+        # Garbage and tracking
+        procd += 1
+        tot_props += epoch_size
+        del result_dict, iterator
+
+    # Done with all patients, save
+    print('\nMade %s Object Proposal boxes from %s images.' % (index, procd))
+    print('Avg: %s Scaphoids from %s Proposals' % (len(data)//procd, tot_props//procd))
+    sdl.save_tfrecords(data, 1, file_root=('%sTest' % tfrecords_dir))
 
 
 def factors(n):
@@ -414,7 +569,9 @@ def inference(iterator, epoch_size, batch_size, index):
 
 
 def main(argv=None):
-    execute()
+    #execute()
+    execute_hedge()
+    #execute_Test()
 
 if __name__ == '__main__':
     tf.app.run()

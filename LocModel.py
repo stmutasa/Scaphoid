@@ -7,7 +7,7 @@
 _author_ = 'simi'
 
 import tensorflow as tf
-import LocInput as Input
+import Input as Input
 import SODNetwork as SDN
 
 # Define the FLAGS class to hold our immutable global variables

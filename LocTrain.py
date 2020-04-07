@@ -9,7 +9,7 @@ import LocModel as network
 import numpy as np
 import tensorflow as tf
 import SODLoader as SDL
-from LocInput import sdd as sdd
+from Input import sdd as sdd
 
 # Define the data directory to use
 home_dir = '/home/stmutasa/Code/Datasets/Scaphoid/'

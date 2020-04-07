@@ -7,7 +7,7 @@
 _author_ = 'simi'
 
 import tensorflow as tf
-import LocInput as Input
+import Input as Input
 import SODNetwork as SDN
 
 # Define the FLAGS class to hold our immutable global variables
@@ -164,4 +164,4 @@ def inputs(training=True, skip=False):
 
     else: print('-------------------------Previously saved records found! Loading...')
 
-    return Input.load_protobuf(training)
+    return Input.load_protobuf_class(training)

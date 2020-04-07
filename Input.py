@@ -235,6 +235,56 @@ def load_protobuf(training=True):
     return iterator
 
 
+def load_protobuf_class(training=True):
+
+    """
+    Loads the classification network protobuf. No oversampling in this case
+    """
+
+    # Saved the data to [0ymin, 1xmin, 2ymax, 3xmax, cny, cnx, 6height, 7width, 8origshapey, 9origshapex,
+    #    10yamin, 11xamin, 12yamax, 13xamax, 14acny, 15acnx, 16aheight, 17awidth, 18IOU, 19obj_class, 20#_class]
+
+    # Lambda functions for retreiving our protobuf
+    _parse_all = lambda dataset: sdl.load_tfrecords(dataset, [FLAGS.box_dims, FLAGS.box_dims], tf.float16,
+                                                    'box_data', tf.float32, [21])
+
+    # Load tfrecords with parallel interleave if training
+    if training:
+        filenames = sdl.retreive_filelist('tfrecords', False, path=FLAGS.data_dir)
+        files = tf.data.Dataset.list_files(os.path.join(FLAGS.data_dir, '*.tfrecords'))
+        dataset = files.interleave(tf.data.TFRecordDataset, cycle_length=len(filenames),
+                                   num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        print('******** Loading Files: ', filenames)
+    else:
+        files = sdl.retreive_filelist('tfrecords', False, path=FLAGS.data_dir)
+        dataset = tf.data.TFRecordDataset(files, num_parallel_reads=1)
+        print('******** Loading Files: ', files)
+
+    # Shuffle and repeat if training phase
+    if training:
+
+        # Large shuffle, repeat for xx epochs then parse the labels only
+        dataset = dataset.shuffle(buffer_size=int(5e5))
+        dataset = dataset.repeat(FLAGS.repeats)
+        dataset = dataset.map(_parse_all, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+
+    else: dataset = dataset.map(_parse_all, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+
+    scope = 'data_augmentation' if training else 'input'
+    with tf.name_scope(scope):
+        dataset = dataset.map(DataPreprocessor(training), num_parallel_calls=tf.data.experimental.AUTOTUNE)
+
+    # Batch and prefetch
+    if training: dataset = dataset.batch(FLAGS.batch_size, drop_remainder=True).prefetch(tf.data.experimental.AUTOTUNE)
+    else: dataset = dataset.batch(FLAGS.batch_size).prefetch(tf.data.experimental.AUTOTUNE)
+
+    # Make an initializable iterator
+    iterator = dataset.make_initializable_iterator()
+
+    # Return data as a dictionary
+    return iterator
+
+
 class DataPreprocessor(object):
 
     # Applies transformations to dataset

@@ -9,7 +9,7 @@ import ClassModel as network
 import numpy as np
 import tensorflow as tf
 import SODLoader as SDL
-from LocInput import sdd as sdd
+from Input import sdd as sdd
 
 # Define the data directory to use
 home_dir = '/home/stmutasa/Code/Datasets/Scaphoid/'
@@ -22,15 +22,15 @@ sdl= SDL.SODLoader('/home/stmutasa/Code/Datasets/Scaphoid/')
 FLAGS = tf.app.flags.FLAGS
 
 # Define some of the data variables
-tf.app.flags.DEFINE_string('data_dir', tfrecords_dir, """Path to the data directory.""")
+tf.app.flags.DEFINE_string('data_dir', 'data/train/', """Path to the data directory.""")
 tf.app.flags.DEFINE_integer('box_dims', 64, """dimensions to save files""")
 tf.app.flags.DEFINE_integer('network_dims', 64, """dimensions of the network input""")
 tf.app.flags.DEFINE_integer('repeats', 10, """epochs to repeat before reloading""")
 tf.app.flags.DEFINE_string('net_type', 'RPNC', """Network predicting CEN, BBOX or RPN""")
 
 # Define some of the immutable variables
-tf.app.flags.DEFINE_integer('num_epochs', 100, """Number of epochs to run""")
-tf.app.flags.DEFINE_integer('epoch_size', int(9.5e4), """Classifier is less data""")
+tf.app.flags.DEFINE_integer('num_epochs', 200, """Number of epochs to run""")
+tf.app.flags.DEFINE_integer('epoch_size', 5456930, """Classifier is less data""")
 tf.app.flags.DEFINE_integer('print_interval', 5, """How often to print a summary to console during training""")
 tf.app.flags.DEFINE_float('checkpoint_interval', 2, """How many Epochs to wait before saving a checkpoint""")
 tf.app.flags.DEFINE_integer('batch_size', 1024, """Number of images to process in a batch.""")
@@ -48,8 +48,8 @@ tf.app.flags.DEFINE_float('beta2', 0.999, """ The beta 1 value for the adam opti
 # Directory control
 tf.app.flags.DEFINE_string('train_dir', 'training/', """Directory to write event logs and save checkpoint files""")
 tf.app.flags.DEFINE_string('RunInfo', 'Class1/', """Unique file name for this training run""")
-tf.app.flags.DEFINE_string('PTModel', 'RPN_FL2/', """The pretrained model to load""")
-tf.app.flags.DEFINE_integer('GPU', 1, """Which GPU to use""")
+tf.app.flags.DEFINE_string('PTModel', 'RPN_FL6/', """The pretrained model to load""")
+tf.app.flags.DEFINE_integer('GPU', 0, """Which GPU to use""")
 
 
 def train():

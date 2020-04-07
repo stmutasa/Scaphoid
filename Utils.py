@@ -21,6 +21,7 @@ FLAGS = tf.app.flags.FLAGS
 home_dir = str(Path.home()) + '/Code/Datasets/Scaphoid/'
 
 rawCR_dir = home_dir + 'RAW_CR/'
+rawCRH_dir = home_dir + 'ScaphoidCR_Hedge/'
 test_loc_folder = home_dir + 'Test/'
 cleanCR_folder = home_dir + 'Cleaned_CR_Single/'
 
@@ -38,6 +39,56 @@ def process_raw():
     save_path = home_dir + 'Cleaned_CR/'
     filenames = sdl.retreive_filelist('*', True, rawCR_dir)
     filenames2 = sdl.retreive_filelist('**', True, rawCR_dir)
+    filenames += filenames2
+
+    # Global variables
+    display, counter, skipped, data_test, index, pt = [], [0, 0], [], {}, 0, 0
+
+    for file in filenames:
+
+        # Retreive the view information.
+        try: img, view, laterality, part, accno, header = filter_DICOM(file)
+        except: continue
+
+        # Get instance number from number in this folder with these accnos
+        savedir = (save_path + accno + '/')
+        try: copy = len(sdl.retreive_filelist('dcm', True, savedir)) + 1
+        except: copy = 1
+
+        # Set destination filename info
+        dst_File = accno + '_' + laterality + '-' + part + '_' + view + '-' + str(copy)
+
+        # Skip non wrists or hands
+        if 'WRIST' not in part and 'HAND' not in part:
+            print ('Skipping: ', dst_File)
+            continue
+
+        # Filename
+        savefile = savedir + dst_File + '.dcm'
+        if not os.path.exists(savedir): os.makedirs(savedir)
+
+        # Copy to the destination folder
+        shutil.copyfile(file, savefile)
+        if index % 10 == 0 and index > 1: print('Saving pt %s of %s to dest: %s' % (index, len(filenames), dst_File))
+
+        # Increment counters
+        index += 1
+        del img
+
+    print('Done with %s images saved' % index)
+
+
+def process_raw_Hedge():
+
+    """
+    This function takes the 9883 raw DICOMs and removes non image files, then saves the DICOMs
+    as filename: Accno_BodyPart/Side_View
+    """
+
+    # Load the filenames and randomly shuffle them
+    save_path = home_dir + 'Cleaned_CR_Hedge/'
+    filenames = sdl.retreive_filelist('*', True, rawCRH_dir)
+    filenames2 = sdl.retreive_filelist('**', True, rawCRH_dir)
     filenames += filenames2
 
     # Global variables
@@ -326,6 +377,7 @@ def filter_DICOM(file, show_debug=False):
     # View 'LAT, PA, OBL, TAN. Only secondary captures lack views
     try: view = header['tags'].ViewPosition.upper()
     except: return
+    if not view: return
 
     # PART: WRIST, HAND
     try:
@@ -680,3 +732,4 @@ def _filter_outside_anchors(anchors, img_dim):
     return valid_anchors
 
 # process_raw()
+#process_raw_Hedge()
