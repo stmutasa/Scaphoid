@@ -731,5 +731,131 @@ def _filter_outside_anchors(anchors, img_dim):
 
     return valid_anchors
 
+
+def check_inputs():
+
+    """
+    Checks the inputs to the classifier for error
+    :return:
+    """
+
+    # Lambda functions for retreiving our protobuf
+    _parse_all = lambda dataset: sdl.load_tfrecords(dataset, [64, 64], tf.float16, 'box_data', tf.float16, [21])
+    files = sdl.retreive_filelist('tfrecords', False, path='data/test/')
+    dataset = tf.data.TFRecordDataset(files, num_parallel_reads=1)
+    print('******** Loading Files: ', files)
+
+    # Large shuffle, repeat for xx epochs then parse the labels only
+    dataset = dataset.shuffle(buffer_size=int(5e5))
+    #dataset = dataset.repeat(10)
+    dataset = dataset.map(_parse_all, num_parallel_calls=tf.data.experimental.AUTOTUNE)
+    with tf.name_scope('testing'):
+        dataset = dataset.map(DataPreprocessor(True), num_parallel_calls=tf.data.experimental.AUTOTUNE)
+
+    # Batch and prefetch
+    dataset = dataset.batch(1024, drop_remainder=True).prefetch(tf.data.experimental.AUTOTUNE)
+
+    # Make an initializable iterator
+    iterator = dataset.make_initializable_iterator()
+    data = iterator.get_next()
+
+    # Data to track
+    max_steps = int((5456930 / 1024) * 1) + 5
+    views, accnos, ids, display = [], [], [], []
+
+    var_init = tf.group(tf.global_variables_initializer(), tf.local_variables_initializer())
+    with tf.Session() as sess:
+        sess.run([var_init, iterator.initializer])
+
+        for i in range(max_steps):
+
+            try:
+                # Load some metrics for testing
+                _data = sess.run(data)
+
+                for z in range (1024):
+                    accno = _data['accno'][z].decode('utf-8')
+                    view = _data['view'][z].decode('utf-8')
+                    accnos.append(accno)
+                    views.append(view)
+                    ids.append(_data['id'][z])
+                    display.append(np.squeeze(_data['data'][z].astype(np.float32)))
+                    print (len(accnos), len(views))
+
+            except Exception as e:
+
+                print('Step: %s-%s of %s-102 Accno %s Error %s' %(i, z, max_steps, accno, e))
+                unia, univ, unii = np.unique(np.asarray(accnos)), np.unique(np.asarray(views)), np.unique(np.asarray(ids))
+                print('Only %s accnos %s views %s ids, %s total' % (len(unia), len(univ), len(unii), len(accnos)))
+                sdd.display_volume(display, True)
+                del e
+
+        unia, univ, unii = np.unique(np.asarray(accnos)), np.unique(np.asarray(views)), np.unique(np.asarray(ids))
+        print('Only %s accnos %s views %s ids, %s total' % (len(unia), len(univ), len(unii), len(accnos)))
+
+
+class DataPreprocessor(object):
+
+    # Applies transformations to dataset
+
+  def __init__(self, distords):
+    self._distords = distords
+
+  def __call__(self, record):
+
+    """Process img for training or eval."""
+    image = record['data']
+
+    if self._distords:  # Training
+
+        # Data Augmentation ------------------ Flip, Contrast, brightness, noise
+
+        # Save the data to [0ymin, 1xmin, 2ymax, 3xmax, cny, cnx, 6height, 7width, 8origshapey, 9origshapex,
+        #    10yamin, 11xamin, 12yamax, 13xamax, 14acny, 15acnx, 16aheight, 17awidth, 18IOU, 19obj_class, 20#_class]
+
+        # Resize to network size
+        image = tf.expand_dims(image, -1)
+        image = tf.image.resize_images(image, [64, 64], tf.compat.v1.image.ResizeMethod.BICUBIC)
+
+        # Image rotation parameters
+        angle = tf.random_uniform([], -0.52, 0.52)
+        image = tf.contrib.image.rotate(image, angle)
+
+        # Then randomly flip
+        image = tf.image.random_flip_left_right(tf.image.random_flip_up_down(image))
+
+        # # Random brightness/contrast
+        image = tf.image.random_brightness(image, max_delta=0.005)
+        image = tf.image.random_contrast(image, lower=0.95, upper=1.05)
+
+        # For noise, first randomly determine how 'noisy' this study will be
+        T_noise = tf.random.uniform([], 0, 0.02)
+
+        # Create a poisson noise array
+        noise = tf.random.uniform(shape=[64, 64, 1], minval=-T_noise, maxval=T_noise)
+
+        # # Normalize the image
+        # image = tf.image.per_image_standardization(image)
+        # image = tf.add(image, noise)
+
+        # Add the poisson noise
+        image = tf.add(image, tf.cast(noise, tf.float16))
+
+    else: # Validation
+
+        image = tf.expand_dims(image, -1)
+
+        # Normalize the image
+        # image = tf.image.per_image_standardization(image)
+
+        # Resize to network size
+        image = tf.image.resize_images(image, [64, 64], tf.compat.v1.image.ResizeMethod.BICUBIC)
+
+    # Make record image
+    record['data'] = image
+
+    return record
+
+check_inputs()
 # process_raw()
 #process_raw_Hedge()

@@ -569,7 +569,7 @@ def inference(iterator, epoch_size, batch_size, index):
 
 
 def main(argv=None):
-    #execute()
+    execute()
     execute_hedge()
     #execute_Test()
 

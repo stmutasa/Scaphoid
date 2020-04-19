@@ -246,7 +246,7 @@ def load_protobuf_class(training=True):
 
     # Lambda functions for retreiving our protobuf
     _parse_all = lambda dataset: sdl.load_tfrecords(dataset, [FLAGS.box_dims, FLAGS.box_dims], tf.float16,
-                                                    'box_data', tf.float32, [21])
+                                                    'box_data', tf.float16, [21])
 
     # Load tfrecords with parallel interleave if training
     if training:

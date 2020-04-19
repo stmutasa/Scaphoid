@@ -31,8 +31,8 @@ tf.app.flags.DEFINE_string('net_type', 'RPNC', """Network predicting CEN, BBOX o
 # Define some of the immutable variables
 tf.app.flags.DEFINE_integer('num_epochs', 200, """Number of epochs to run""")
 tf.app.flags.DEFINE_integer('epoch_size', 5456930, """Classifier is less data""")
-tf.app.flags.DEFINE_integer('print_interval', 5, """How often to print a summary to console during training""")
-tf.app.flags.DEFINE_float('checkpoint_interval', 2, """How many Epochs to wait before saving a checkpoint""")
+tf.app.flags.DEFINE_integer('print_interval', 2, """How often to print a summary to console during training""")
+tf.app.flags.DEFINE_float('checkpoint_interval', 4, """How many Epochs to wait before saving a checkpoint""")
 tf.app.flags.DEFINE_integer('batch_size', 1024, """Number of images to process in a batch.""")
 
 # Hyperparameters:
@@ -41,15 +41,15 @@ tf.app.flags.DEFINE_float('l2_gamma', 1e-3, """ The gamma value for regularizati
 tf.app.flags.DEFINE_float('moving_avg_decay', 0.999, """ The decay rate for the moving average tracker""")
 
 # Hyperparameters to control the optimizer
-tf.app.flags.DEFINE_float('learning_rate',1e-5, """Initial learning rate""")
+tf.app.flags.DEFINE_float('learning_rate',1e-4, """Initial learning rate""")
 tf.app.flags.DEFINE_float('beta1', 0.9, """ The beta 1 value for the adam optimizer""")
 tf.app.flags.DEFINE_float('beta2', 0.999, """ The beta 1 value for the adam optimizer""")
 
 # Directory control
 tf.app.flags.DEFINE_string('train_dir', 'training/', """Directory to write event logs and save checkpoint files""")
-tf.app.flags.DEFINE_string('RunInfo', 'Class1/', """Unique file name for this training run""")
+tf.app.flags.DEFINE_string('RunInfo', 'Class2/', """Unique file name for this training run""")
 tf.app.flags.DEFINE_string('PTModel', 'RPN_FL6/', """The pretrained model to load""")
-tf.app.flags.DEFINE_integer('GPU', 0, """Which GPU to use""")
+tf.app.flags.DEFINE_integer('GPU', 1, """Which GPU to use""")
 
 
 def train():
