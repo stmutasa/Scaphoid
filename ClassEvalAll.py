@@ -35,8 +35,8 @@ tf.app.flags.DEFINE_float('moving_avg_decay', 0.999, """ The decay rate for the 
 # Directory control
 tf.app.flags.DEFINE_string('train_dir', 'training/', """Directory where to retrieve checkpoint files""")
 tf.app.flags.DEFINE_string('net_type', 'RPNC', """Network predicting CEN or BBOX""")
-tf.app.flags.DEFINE_string('RunInfo', 'Class2/', """Unique file name for this training run""")
-tf.app.flags.DEFINE_integer('GPU', 1, """Which GPU to use""")
+tf.app.flags.DEFINE_string('RunInfo', 'Class01/', """Unique file name for this training run""")
+tf.app.flags.DEFINE_integer('GPU', 0, """Which GPU to use""")
 
 # Define a custom training class
 def test():
@@ -93,11 +93,8 @@ def test():
                 Epoch = checkpoint.split('/')[-1].split('Epoch')[-1]
                 print("*** Testing Checkpoint %s Run %s on GPU %s ****" % (checkpoint, FLAGS.RunInfo, FLAGS.GPU))
 
-                # Initialize the step counter
-                step, made = 0, False
-
                 # Init stats
-                TP, TN, FP, FN = 0, 0, 0, 0
+                TP, TN, FP, FN, step = 0, 0, 0, 0, 0
 
                 # Set the max step count
                 max_steps = int(FLAGS.epoch_size / FLAGS.batch_size)
@@ -109,13 +106,13 @@ def test():
                     while step < max_steps:
 
                         # Load some metrics for testing
-                        __lbls, __smx, __accno = mon_sess.run([labels, softmax, data['accno']], feed_dict={phase_train: False})
+                        __lbls, __smx, __accno = mon_sess.run([labels[:, 20], softmax, data['accno']], feed_dict={phase_train: False})
 
                         # Combine metrics
                         if step == 0:
                             _lbls = np.copy(__lbls)
                             _smx = np.copy(__smx)
-                            _accnos = np.copy(__accno)
+                            _accnos = np.copy(__accno.astype('U13'))
                         else:
                             _lbls = np.concatenate([_lbls, __lbls])
                             _smx = np.concatenate([_smx, __smx])
@@ -131,15 +128,16 @@ def test():
                 finally:
 
                     # Combine metrics
+                    print (len(np.unique(_accnos)))
                     _data, _labels, _softmax = sdt.combine_predictions(_lbls, _smx, _accnos, FLAGS.batch_size)
 
                     # Retreive the scores
                     sdt.calculate_metrics(_softmax, _labels, 1, step)
                     sdt.retreive_metrics_classification(Epoch, True)
-                    print('------ Current Best AUC: %.4f (Epoch: %s) --------' % (best_MAE, best_epoch))
+                    print('------ Current Best AUC: %.4f (Epoch: %s) --------' % (best_score, best_epoch))
 
                     # Lets save runs that perform well
-                    if sdt.AUC >= best_MAE:
+                    if sdt.AUC >= best_score:
 
                         # Save the checkpoint
                         print(" ---------------- SAVING THIS ONE %s", ckpt.model_checkpoint_path)
@@ -155,7 +153,7 @@ def test():
                         sdl.save_Dict_CSV(_data, csv_file)
 
                         # Save a new best MAE
-                        best_MAE = sdt.AUC
+                        best_score = sdt.AUC
                         best_epoch = Epoch
 
                     # Shut down the session

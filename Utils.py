@@ -856,6 +856,6 @@ class DataPreprocessor(object):
 
     return record
 
-check_inputs()
+#check_inputs()
 # process_raw()
 #process_raw_Hedge()

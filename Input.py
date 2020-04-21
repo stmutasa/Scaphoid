@@ -309,25 +309,26 @@ class DataPreprocessor(object):
         image = tf.image.resize_images(image, [FLAGS.network_dims, FLAGS.network_dims], tf.compat.v1.image.ResizeMethod.BICUBIC)
 
         # Image rotation parameters
-        angle = tf.random_uniform([], -0.52, 0.52)
+        angle = tf.random_uniform([], -0.26, 0.26)
         image = tf.contrib.image.rotate(image, angle)
 
         # Then randomly flip
         image = tf.image.random_flip_left_right(tf.image.random_flip_up_down(image))
+        #image = tf.image.random_flip_left_right(image)
 
         # Random brightness/contrast
-        image = tf.image.random_brightness(image, max_delta=2)
-        image = tf.image.random_contrast(image, lower=0.995, upper=1.005)
+        image = tf.image.random_brightness(image, max_delta=0.05)
+        image = tf.image.random_contrast(image, lower=0.95, upper=1.05)
 
         # For noise, first randomly determine how 'noisy' this study will be
-        T_noise = tf.random.uniform([], 0, 0.02)
+        T_noise = tf.random.uniform([], 0, 0.05)
 
         # Create a poisson noise array
         noise = tf.random.uniform(shape=[FLAGS.network_dims, FLAGS.network_dims, 1], minval=-T_noise, maxval=T_noise)
 
-        # # Normalize the image
-        # image = tf.image.per_image_standardization(image)
-        # image = tf.add(image, noise)
+        # Normalize the image
+        image = tf.image.per_image_standardization(image)
+        image = tf.add(image, noise)
 
         # Add the poisson noise
         image = tf.add(image, tf.cast(noise, tf.float16))

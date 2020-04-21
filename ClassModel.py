@@ -75,7 +75,7 @@ def total_loss(logits, labels):
     """
 
     # Loss factor
-    fracture_factor = 2.0
+    fracture_factor = 1.0
 
     # Squish
     labels = tf.cast(tf.squeeze(labels), tf.float32)
