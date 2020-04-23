@@ -355,15 +355,10 @@ def filter_DICOM(file, show_debug=False):
                     laterality = 'L'
                 else:
                     laterality = 'R'
-            except:
-                try:
-                    if 'LEFT' in header['tags'].SeriesDescription.upper():
-                        laterality = 'L'
-                    else:
-                        laterality = 'R'
-                except Exception as e:
-                    if show_debug: print('Laterality Error: %s' % e)
-                    laterality = 'UKLAT'
+            except Exception as e:
+                if show_debug: print('Laterality Error: %s - %s' % (file, e))
+                laterality = 'UKLAT'
+                return
 
     # Accession number
     try: accno = header['tags'].AccessionNumber
@@ -374,28 +369,36 @@ def filter_DICOM(file, show_debug=False):
             dir = os.path.dirname(file)
             accno = dir.split('/')[-3]
 
-    # View 'LAT, PA, OBL, TAN. Only secondary captures lack views
+    # View 'LAT, PA, OBL, TAN, 'NAVICUL BONE'. Only secondary captures lack views
     try: view = header['tags'].ViewPosition.upper()
-    except: return
-    if not view: return
+    except Exception as e:
+        if show_debug: print('View Error: %s - %s' % (file, e))
+        return
+
+    # Sometimes view is stored in series Description
+    if not view:
+        sdesc = header['tags'].SeriesDescription.upper()
+        if 'PA' in sdesc or 'OBL' in sdesc or 'TAN' in sdesc or 'NAVIC' in sdesc:
+            view = sdesc
+            if show_debug: print('Setting view to: %s - %s' % (sdesc, file))
+        else:
+            if show_debug and 'LAT' not in sdesc: print('View Absent Error Sdesc: %s - File: %s' % (sdesc, file))
+            return
 
     # PART: WRIST, HAND
-    try:
-        if 'WRIST' in header['tags'].StudyDescription.upper():
-            part = 'WRIST'
-        elif 'HAND' in header['tags'].StudyDescription.upper():
-            part = 'HAND'
-        elif 'WRIST' in header['tags'].SeriesDescription.upper():
-            part = 'WRIST'
-        elif 'HAND' in header['tags'].SeriesDescription.upper():
-            part = 'HAND'
-        else:
-            part = 'UKPART'
+    try: part = header['tags'].BodyPartExamined.upper()
     except:
         try:
-            part = header['tags'].BodyPartExamined.upper()
+            if 'WRIST' in header['tags'].StudyDescription.upper():
+                part = 'WRIST'
+            elif 'HAND' in header['tags'].StudyDescription.upper():
+                part = 'HAND'
+            elif 'WRIST' in header['tags'].SeriesDescription.upper():
+                part = 'WRIST'
+            elif 'HAND' in header['tags'].SeriesDescription.upper():
+                part = 'HAND'
         except Exception as e:
-            if show_debug: print('Header Error: %s' %e)
+            if show_debug: print('Body Part Error: %s - %s' % (file, e))
             return
 
     # Return everything
@@ -745,12 +748,10 @@ def check_inputs():
     dataset = tf.data.TFRecordDataset(files, num_parallel_reads=1)
     print('******** Loading Files: ', files)
 
-    # Large shuffle, repeat for xx epochs then parse the labels only
-    dataset = dataset.shuffle(buffer_size=int(5e5))
-    #dataset = dataset.repeat(10)
+    # Map
     dataset = dataset.map(_parse_all, num_parallel_calls=tf.data.experimental.AUTOTUNE)
     with tf.name_scope('testing'):
-        dataset = dataset.map(DataPreprocessor(True), num_parallel_calls=tf.data.experimental.AUTOTUNE)
+        dataset = dataset.map(DataPreprocessor(False), num_parallel_calls=tf.data.experimental.AUTOTUNE)
 
     # Batch and prefetch
     dataset = dataset.batch(1024, drop_remainder=True).prefetch(tf.data.experimental.AUTOTUNE)
@@ -779,7 +780,8 @@ def check_inputs():
                     accnos.append(accno)
                     views.append(view)
                     ids.append(_data['id'][z])
-                    display.append(np.squeeze(_data['data'][z].astype(np.float32)))
+                    img = sdd.return_image_text_overlay(view.split('_')[-1], np.squeeze(_data['data'][z].astype(np.float32)))
+                    display.append(img)
                     print (len(accnos), len(views))
 
             except Exception as e:

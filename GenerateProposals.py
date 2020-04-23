@@ -155,7 +155,7 @@ def execute_hedge():
     Train_labels = sdl.load_CSV_Dict('Accno', path=label_folder + 'Train_Lbls.csv')
 
     # Global variables
-    data, index, procd, counter =  {}, 0, 0, [0, 0]
+    data, index, procd, counter =  {}, int(1e6), 0, [0, 0]
     tot_props = 0
 
     for file in filenames:
@@ -168,7 +168,7 @@ def execute_hedge():
         except: pass
 
         # Save protobuff and get epoch size
-        try: epoch_size, ID, cls = pre_proc_localizations(64, file, Train_labels)
+        try: epoch_size, ID, cls = pre_proc_localizations(64, file, Train_labels, group='hedge')
         except: continue
 
         # Get factors of epoch size for batch size and return number closest to 1k
@@ -229,9 +229,6 @@ def execute_Test():
     print ('Found %s image files and %s test labels, ...starting' %(totimg, len(labels)))
     time.sleep(3)
 
-    # Load the labels
-    Train_labels = sdl.load_CSV_Dict('Accno', path=label_folder + 'Train_Lbls.csv')
-
     # Global variables
     data, index, procd, counter =  {}, 0, 0, [0, 0]
     tot_props = 0
@@ -246,7 +243,7 @@ def execute_Test():
         except: continue
 
         # Save protobuff and get epoch size
-        try: epoch_size, ID, cls = pre_proc_localizations(64, file, labels)
+        try: epoch_size, ID, cls = pre_proc_localizations(64, file, labels, group='test')
         except: continue
 
         # Get factors of epoch size for batch size and return number closest to 1k
@@ -274,7 +271,7 @@ def execute_Test():
         counter[cls] += len(result_dict)
 
         # Display
-        print ('\n *** Made %s boxes of the scaphoid from %s proposals in image %s (IMG %s of %s, Objects so far: %s)*** \n'
+        print ('\n *** Made %s boxes of the scaphoid from %s proposals in image %s (IMG %s of %s, Objects so far: %s) *** \n'
                %(len(result_dict), epoch_size, ID, procd, totimg, counter))
 
         # Garbage and tracking
@@ -283,8 +280,7 @@ def execute_Test():
         del result_dict, iterator
 
     # Done with all patients, save
-    print('\nMade %s Object Proposal boxes from %s images.' % (index, procd))
-    print('Avg: %s Scaphoids from %s Proposals' % (len(data)//procd, tot_props//procd))
+    print('\nMade %s Object Proposal boxes from %s Test images, Avg %s.' % (len(data), procd, len(data)//procd))
     sdl.save_tfrecords(data, 1, file_root=('%sTest' % tfrecords_dir))
 
 
@@ -294,7 +290,7 @@ def factors(n):
                     ([i, n//i] for i in range(1, int(sqrt(n))+1, step) if n % i == 0)))
 
 
-def pre_proc_localizations(box_dims, file, labels):
+def pre_proc_localizations(box_dims, file, labels, group='proposals'):
 
     """
     Pre processes the input for the classification
@@ -304,11 +300,10 @@ def pre_proc_localizations(box_dims, file, labels):
     """
 
     # Global variables
-    group = 'Proposals'
     display, counter, data, index = [], [0, 0], {}, 0
 
     # Load the info
-    image, view, laterality, part, accno, header = Utils.filter_DICOM(file)
+    image, view, laterality, part, accno, header = Utils.filter_DICOM(file, show_debug=True)
 
     # Skip laterals
     if 'LAT' in view:
@@ -320,15 +315,8 @@ def pre_proc_localizations(box_dims, file, labels):
     # Get the label
     try: fracture_class = int(labels[accno]['Lbl'])
     except:
-        print('Cant find label for ', dst_File)
+        print('Error: Cant find label for ', dst_File)
         return
-
-    # Retreive photometric interpretation (1 = negative XRay) if available
-    try:
-        photometric = int(header['tags'].PhotometricInterpretation[-1])
-        if photometric == 1: image *= -1
-    except:
-        pass
 
     # Normalize image
     image = sdl.adaptive_normalization(image).astype(np.float32)
@@ -399,7 +387,7 @@ def pre_proc_localizations(box_dims, file, labels):
     # Increment patient counters
     del image
 
-    sdl.save_dict_filetypes(data[0], (tfrecords_dir + 'filetypes'))
+    sdl.save_dict_filetypes(data[0], (tfrecords_dir + 'filetypes_tmp'))
     sdl.save_tfrecords(data, 1, file_root=('%s/PROPS' %tfrecords_dir))
 
     del data
@@ -415,12 +403,9 @@ def load_protobuf(batch_size):
     # Saved the data to [0ymin, 1xmin, 2ymax, 3xmax, cny, cnx, 6height, 7width, 8origshapey, 9origshapex,
     #    10yamin, 11xamin, 12yamax, 13xamax, 14acny, 15acnx, 16aheight, 17awidth, 18IOU, 19obj_class, 20#_class]
 
-    # Get saved dictionary
-    dict_file = sdl.retreive_filelist('p', True, path=tfrecords_dir)[0]
-
     # Lambda functions for retreiving our protobuf
     _parse_all = lambda dataset: sdl.load_tfrecords(dataset, [FLAGS.box_dims, FLAGS.box_dims], tf.float16,
-                                                    'box_data', tf.float32, [21], pickle_dict=dict_file)
+                                                    'box_data', tf.float32, [21], pickle_dict=(tfrecords_dir + 'filetypes_tmp_pickle.p'))
 
     # Load tfrecords
     files = sdl.retreive_filelist('tfrecords', False, path=tfrecords_dir)
@@ -570,8 +555,8 @@ def inference(iterator, epoch_size, batch_size, index):
 
 def main(argv=None):
     execute()
-    execute_hedge()
-    #execute_Test()
+    # execute_hedge()
+    # execute_Test()
 
 if __name__ == '__main__':
     tf.app.run()

@@ -25,8 +25,8 @@ tf.app.flags.DEFINE_string('data_dir', 'data/test/', """Path to the data directo
 tf.app.flags.DEFINE_string('training_dir', 'training/', """Path to the training directory.""")
 tf.app.flags.DEFINE_integer('box_dims', 64, """dimensions to save files""")
 tf.app.flags.DEFINE_integer('network_dims', 64, """dimensions of the network input""")
-tf.app.flags.DEFINE_integer('epoch_size', 1024, """How many examples""")
-tf.app.flags.DEFINE_integer('batch_size', 1024, """Number of images to process in a batch.""")
+tf.app.flags.DEFINE_integer('epoch_size', 2048, """How many examples""")
+tf.app.flags.DEFINE_integer('batch_size', 2048, """Number of images to process in a batch.""")
 
 # Hyperparameters:
 tf.app.flags.DEFINE_float('dropout_factor', 0.75, """ Keep probability""")
@@ -35,7 +35,7 @@ tf.app.flags.DEFINE_float('moving_avg_decay', 0.999, """ The decay rate for the 
 # Directory control
 tf.app.flags.DEFINE_string('train_dir', 'training/', """Directory where to retrieve checkpoint files""")
 tf.app.flags.DEFINE_string('net_type', 'RPNC', """Network predicting CEN or BBOX""")
-tf.app.flags.DEFINE_string('RunInfo', 'Class01/', """Unique file name for this training run""")
+tf.app.flags.DEFINE_string('RunInfo', 'Class2/', """Unique file name for this training run""")
 tf.app.flags.DEFINE_integer('GPU', 0, """Which GPU to use""")
 
 # Define a custom training class

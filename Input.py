@@ -331,14 +331,14 @@ class DataPreprocessor(object):
         image = tf.add(image, noise)
 
         # Add the poisson noise
-        image = tf.add(image, tf.cast(noise, tf.float16))
+        #image = tf.add(image, tf.cast(noise, tf.float16))
 
     else: # Validation
 
         image = tf.expand_dims(image, -1)
 
         # Normalize the image
-        # image = tf.image.per_image_standardization(image)
+        #image = tf.image.per_image_standardization(image)
 
         # Resize to network size
         image = tf.image.resize_images(image, [FLAGS.network_dims, FLAGS.network_dims], tf.compat.v1.image.ResizeMethod.BICUBIC)
