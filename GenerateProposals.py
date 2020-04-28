@@ -24,10 +24,10 @@ FLAGS = tf.app.flags.FLAGS
 
 # Define the data directory to use
 home_dir = '/home/stmutasa/Code/Datasets/Scaphoid/'
-tfrecords_dir = home_dir + 'tfrecords/temp/'
+tfrecords_dir = home_dir + 'tfrecords/temp2/'
 
 test_loc_folder = home_dir + 'Test/'
-cleanCR_folder = home_dir + 'Cleaned_CR/'
+cleanCR_folder = home_dir + 'Cleaned_CR/A2/'
 hedgeCR_folder = home_dir + 'Cleaned_CR_Hedge/'
 label_folder = home_dir + 'Labels/'
 
@@ -62,7 +62,6 @@ def execute():
     labels = sdl.load_CSV_Dict('Accno', path=label_folder + 'Test_Lbls.csv')
     labels.update(sdl.load_CSV_Dict('Accno', path=label_folder + 'Test_Lbls_EZ.csv'))
     filenames = sdl.retreive_filelist('dcm', True, cleanCR_folder)
-    shuffle(filenames)
     totimg = len(filenames)
     print ('Found %s image files and %s test labels, ...starting' %(totimg, len(labels)))
     time.sleep(3)
@@ -84,7 +83,7 @@ def execute():
         except: pass
 
         # Save protobuff and get epoch size
-        try: epoch_size, ID, cls = pre_proc_localizations(64, file, Train_labels)
+        try: epoch_size, ID, cls = pre_proc_localizations(64, file, Train_labels, group='train')
         except: continue
 
         # Get factors of epoch size for batch size and return number closest to 1k
@@ -103,7 +102,7 @@ def execute():
         if len(result_dict) >= top_n:
 
             # Double up on the positives
-            if result_dict[index-1]['box_data'][20] == 1: top_n *= 2
+            if result_dict[index-1]['box_data'][20] == 1 and len(result_dict) >top_n*2: top_n *= 2
 
             # Sort items by obj_prob in iterated list. Use reverse to get biggest first, take n with slicing then make dict
             result_dict = dict(sorted(result_dict.items(), key=lambda x: x[1]['obj_prob'], reverse=True)[:top_n])
@@ -129,8 +128,7 @@ def execute():
         del result_dict, iterator
 
     # Done with all patients, save
-    print('\nMade %s Object Proposal boxes from %s images.' % (index, procd))
-    print('Avg: %s Scaphoids from %s Proposals' % (len(data)//procd, tot_props//procd))
+    print('\nMade %s Object Proposal boxes from %s Test images, Avg %s.' % (len(data), procd, len(data)//procd))
     sdl.save_dict_filetypes(data[next(iter(data))], (tfrecords_dir + 'filetypes'))
     sdl.save_segregated_tfrecords(5, data, 'accno', file_root=('%sObjects' % tfrecords_dir))
 
