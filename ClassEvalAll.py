@@ -25,8 +25,8 @@ tf.app.flags.DEFINE_string('data_dir', 'data/test/', """Path to the data directo
 tf.app.flags.DEFINE_string('training_dir', 'training/', """Path to the training directory.""")
 tf.app.flags.DEFINE_integer('box_dims', 64, """dimensions to save files""")
 tf.app.flags.DEFINE_integer('network_dims', 64, """dimensions of the network input""")
-tf.app.flags.DEFINE_integer('epoch_size', 2153, """How many examples""")
-tf.app.flags.DEFINE_integer('batch_size', 2153, """Number of images to process in a batch.""")
+tf.app.flags.DEFINE_integer('epoch_size', 3072, """How many examples""")
+tf.app.flags.DEFINE_integer('batch_size', 3072, """Number of images to process in a batch.""")
 
 # Hyperparameters:
 tf.app.flags.DEFINE_float('dropout_factor', 0.75, """ Keep probability""")
@@ -35,7 +35,7 @@ tf.app.flags.DEFINE_float('moving_avg_decay', 0.999, """ The decay rate for the 
 # Directory control
 tf.app.flags.DEFINE_string('train_dir', 'training/', """Directory where to retrieve checkpoint files""")
 tf.app.flags.DEFINE_string('net_type', 'RPNC', """Network predicting CEN or BBOX""")
-tf.app.flags.DEFINE_string('RunInfo', 'Class2/', """Unique file name for this training run""")
+tf.app.flags.DEFINE_string('RunInfo', 'Class01/', """Unique file name for this training run""")
 tf.app.flags.DEFINE_integer('GPU', 0, """Which GPU to use""")
 
 # Define a custom training class
@@ -106,20 +106,22 @@ def test():
                     while step < max_steps:
 
                         # Load some metrics for testing
-                        __lbls, __smx, __accno = mon_sess.run([labels[:, 20], softmax, data['accno']], feed_dict={phase_train: False})
+                        __lbls, __smx, __accno, __obj = mon_sess.run([labels[:, 20], softmax, data['accno'], data['obj_prob']], feed_dict={phase_train: False})
 
                         # Combine metrics
                         if step == 0:
                             _lbls = np.copy(__lbls)
                             _smx = np.copy(__smx)
+                            _obj = np.copy(__obj)
                             _accnos = np.copy(__accno.astype('U13'))
                         else:
                             _lbls = np.concatenate([_lbls, __lbls])
                             _smx = np.concatenate([_smx, __smx])
+                            _obj = np.concatenate([_obj, __obj])
                             _accnos = np.concatenate([_accnos, __accno])
 
                         # Increment step
-                        del __lbls, __smx, __accno
+                        del __lbls, __smx, __accno, __obj
                         step += 1
 
                 except tf.errors.OutOfRangeError:
@@ -129,7 +131,7 @@ def test():
 
                     # Combine metrics
                     print (len(np.unique(_accnos)))
-                    _data, _labels, _softmax = sdt.combine_predictions(_lbls, _smx, _accnos, FLAGS.batch_size)
+                    _data, _labels, _softmax = combine_predictions(_lbls, _smx, _accnos, _obj, FLAGS.batch_size, sdt)
 
                     # Retreive the scores
                     sdt.calculate_metrics(_softmax, _labels, 1, step)
@@ -157,8 +159,52 @@ def test():
                         best_epoch = Epoch
 
                     # Shut down the session
-                    del _data, _labels, _softmax, _lbls, _smx, _accnos
+                    del _data, _labels, _softmax, _lbls, _smx, _accnos, _obj
                     mon_sess.close()
+
+
+def combine_predictions(ground_truth, predictions, unique_ID, _obj_prob, batch_size, sdt):
+
+    # Convert to numpy arrays
+    predictions, label = np.squeeze(predictions.astype(np.float)), np.squeeze(ground_truth.astype(np.float))
+    serz = np.squeeze(unique_ID)
+
+    # The dictionary to return
+    data = {}
+
+    # add up the predictions
+    for z in range(batch_size):
+
+        # If we already have the entry then just append
+        try:
+            if serz[z] in data:
+                data[serz[z]]['log1'] = data[serz[z]]['log1'] + (predictions[z] * _obj_prob[z])
+                data[serz[z]]['total'] += 1
+            else:
+                data[serz[z]] = {'label': label[z], 'log1': (predictions[z] * _obj_prob[z]), 'total': 1, 'avg': None}
+        except Exception as e:
+            print('Combine error: ', e)
+            continue
+
+    # Initialize new labels and logits
+    logga, labba = [], []
+
+    # Combine the data
+    for idx, dic in data.items():
+
+        # Calculate the softmax
+        softmax = np.asarray(dic['log1']) / dic['total']
+        for z in range(dic['log1'].shape[0]):  dic[('Class_%s_Probability' %z)] = softmax[z]
+
+        # Append to the new arrays
+        labba.append(dic['label'])
+        logga.append(np.squeeze(softmax))
+
+        # add to the dictionary
+        dic['avg'] = np.squeeze(softmax)
+        dic['ID'] = idx
+
+    return data, np.squeeze(labba), np.squeeze(logga)
 
 
 def main(argv=None):

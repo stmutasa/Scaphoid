@@ -24,7 +24,7 @@ FLAGS = tf.app.flags.FLAGS
 
 # Define the data directory to use
 home_dir = '/home/stmutasa/Code/Datasets/Scaphoid/'
-tfrecords_dir = home_dir + 'tfrecords/temp2/'
+tfrecords_dir = home_dir + 'tfrecords/temp1/'
 
 test_loc_folder = home_dir + 'Test/'
 cleanCR_folder = home_dir + 'Cleaned_CR/A2/'
@@ -48,7 +48,7 @@ tf.app.flags.DEFINE_float('moving_avg_decay', 0.999, """ The decay rate for the 
 tf.app.flags.DEFINE_string('train_dir', 'training/', """Directory where to retrieve checkpoint files""")
 tf.app.flags.DEFINE_string('net_type', 'RPNC', """Network predicting CEN or BBOX""")
 tf.app.flags.DEFINE_string('RunInfo', 'RPN_FL6/', """Unique file name for this training run""")
-tf.app.flags.DEFINE_integer('GPU', 1, """Which GPU to use""")
+tf.app.flags.DEFINE_integer('GPU', 0, """Which GPU to use""")
 
 
 def execute():
@@ -147,7 +147,7 @@ def execute_hedge():
     shuffle(filenames)
     totimg = len(filenames)
     print ('Found %s image files and %s test labels, ...starting' %(totimg, len(labels)))
-    time.sleep(3)
+    time.sleep(1)
 
     # Load the labels
     Train_labels = sdl.load_CSV_Dict('Accno', path=label_folder + 'Train_Lbls.csv')
@@ -185,7 +185,9 @@ def execute_hedge():
         if len(result_dict) >= top_n:
 
             # Double up on the positives
-            if result_dict[index-1]['box_data'][20] == 1: top_n *= 2
+            if result_dict[index-1]['box_data'][20] == 1:
+                if len(result_dict) >top_n*2: top_n *= 2
+                else: top_n = len(result_dict)
 
             # Sort items by obj_prob in iterated list. Use reverse to get biggest first, take n with slicing then make dict
             result_dict = dict(sorted(result_dict.items(), key=lambda x: x[1]['obj_prob'], reverse=True)[:top_n])
@@ -206,8 +208,7 @@ def execute_hedge():
         del result_dict, iterator
 
     # Done with all patients, save
-    print('\nMade %s Object Proposal boxes from %s images.' % (index, procd))
-    print('Avg: %s Hedged Scaphoids from %s Proposals' % (len(data)//procd, tot_props//procd))
+    print('\nMade %s Object Proposal boxes from %s Hedge images, Avg %s.' % (len(data), procd, len(data)//procd))
     sdl.save_segregated_tfrecords(2, data, 'accno', file_root=('%sHedge' % tfrecords_dir))
 
 
@@ -221,7 +222,7 @@ def execute_Test():
     # Load the labels and files and randomly shuffle them
     labels = sdl.load_CSV_Dict('Accno', path=label_folder + 'Test_Lbls.csv')
     labels.update(sdl.load_CSV_Dict('Accno', path=label_folder + 'Test_Lbls_EZ.csv'))
-    filenames = sdl.retreive_filelist('dcm', True, cleanCR_folder)
+    filenames = sdl.retreive_filelist('dcm', True, cleanCR_folder) + sdl.retreive_filelist('dcm', True, hedgeCR_folder)
     shuffle(filenames)
     totimg = len(filenames)
     print ('Found %s image files and %s test labels, ...starting' %(totimg, len(labels)))
@@ -269,7 +270,7 @@ def execute_Test():
         counter[cls] += len(result_dict)
 
         # Display
-        print ('\n *** Made %s boxes of the scaphoid from %s proposals in image %s (IMG %s of %s, Objects so far: %s) *** \n'
+        print ('\n *** Made %s Test boxes of the scaphoid from %s proposals in image %s (IMG %s of %s, Objects so far: %s) *** \n'
                %(len(result_dict), epoch_size, ID, procd, totimg, counter))
 
         # Garbage and tracking
@@ -552,9 +553,9 @@ def inference(iterator, epoch_size, batch_size, index):
 
 
 def main(argv=None):
-    execute()
-    # execute_hedge()
+    # execute()
     # execute_Test()
+    execute_hedge()
 
 if __name__ == '__main__':
     tf.app.run()

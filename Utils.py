@@ -744,7 +744,7 @@ def check_inputs():
 
     # Lambda functions for retreiving our protobuf
     _parse_all = lambda dataset: sdl.load_tfrecords(dataset, [64, 64], tf.float16, 'box_data', tf.float16, [21])
-    files = sdl.retreive_filelist('tfrecords', False, path='data/test/')
+    files = sdl.retreive_filelist('tfrecords', False, path='data/train/')
     dataset = tf.data.TFRecordDataset(files, num_parallel_reads=1)
     print('******** Loading Files: ', files)
 
@@ -781,7 +781,7 @@ def check_inputs():
                     views.append(view)
                     ids.append(_data['id'][z])
                     img = sdd.return_image_text_overlay(view.split('_')[-1], np.squeeze(_data['data'][z].astype(np.float32)))
-                    display.append(img)
+                    #display.append(img)
                     print (len(accnos), len(views))
 
             except Exception as e:
@@ -789,7 +789,7 @@ def check_inputs():
                 print('Step: %s-%s of %s-102 Accno %s Error %s' %(i, z, max_steps, accno, e))
                 unia, univ, unii = np.unique(np.asarray(accnos)), np.unique(np.asarray(views)), np.unique(np.asarray(ids))
                 print('Only %s accnos %s views %s ids, %s total' % (len(unia), len(univ), len(unii), len(accnos)))
-                sdd.display_volume(display, True)
+                #sdd.display_volume(display, True)
                 del e
 
         unia, univ, unii = np.unique(np.asarray(accnos)), np.unique(np.asarray(views)), np.unique(np.asarray(ids))
@@ -858,6 +858,6 @@ class DataPreprocessor(object):
 
     return record
 
-#check_inputs()
+check_inputs()
 # process_raw()
 #process_raw_Hedge()
