@@ -66,16 +66,13 @@ def forward_pass_RPN(images, phase_train):
     return LogitsC
 
 
-def total_loss(logits, labels):
+def total_loss(logits, labels, type='FL'):
 
     """
     Classification loss, which is weighted cross entropy
     Saved the data to [0ymin, 1xmin, 2ymax, 3xmax, cny, cnx, 6height, 7width, 8origshapey, 9origshapex,
         10yamin, 11xamin, 12yamax, 13xamax, 14acny, 15acnx, 16aheight, 17awidth, 18IOU, 19obj_class, 20#_class]
     """
-
-    # Loss factor
-    fracture_factor = 1.0
 
     # Squish
     labels = tf.cast(tf.squeeze(labels), tf.float32)
@@ -84,20 +81,27 @@ def total_loss(logits, labels):
     # Change labels to one hot
     labelsC = tf.one_hot(tf.cast(labels[:, 20], tf.uint8), depth=2, dtype=tf.uint8)
 
-    # Make a weighting mask for object foreground classification loss
-    class_mask = tf.cast(labels[:, 20] > 0, tf.float32)
+    if type=='WCE':
 
-    # Now multiply this mask by scaling factor then add back to labels. Add 1 to prevent 0 loss
-    class_mask = tf.add(tf.multiply(class_mask, fracture_factor), 1)
+        # Loss factor
+        fracture_factor = 5.0
+        # Make a weighting mask for object foreground classification loss
+        class_mask = tf.cast(labels[:, 20] > 0, tf.float32)
+        # Now multiply this mask by scaling factor then add back to labels. Add 1 to prevent 0 loss
+        class_mask = tf.add(tf.multiply(class_mask, fracture_factor), 1)
+        # Calculate  loss
+        class_loss = tf.nn.softmax_cross_entropy_with_logits_v2(labels=tf.squeeze(labelsC), logits=logits)
+        # Add in classification mask
+        if fracture_factor != 1.0: class_loss = tf.multiply(class_loss, tf.squeeze(class_mask))
+        # Reduce to scalar
+        class_loss = tf.reduce_mean(class_loss)
 
-    # Calculate  loss
-    class_loss = tf.nn.softmax_cross_entropy_with_logits_v2(labels=tf.squeeze(labelsC), logits=logits)
+    else:
 
-    # Add in classification mask
-    if fracture_factor != 1.0: class_loss = tf.multiply(class_loss, tf.squeeze(class_mask))
-
-    # Reduce to scalar
-    class_loss = tf.reduce_mean(class_loss)
+        # Use focal loss
+        class_loss = tf.reduce_sum(focal_softmax_cross_entropy_with_logits(labelsC, logits, alpha=[0.25, 0.75]))
+        # Normalize by minibatch size
+        class_loss = tf.divide(class_loss, FLAGS.batch_size)
 
     # Output the summary of the MSE and MAE
     tf.summary.scalar('Class_Loss', class_loss)
@@ -165,3 +169,47 @@ def inputs(training=True, skip=False):
     else: print('-------------------------Previously saved records found! Loading...')
 
     return Input.load_protobuf_class(training)
+
+
+def focal_softmax_cross_entropy_with_logits(labels, logits, focus=2.0, alpha=[0.25, 0.75],
+                                            name='focal_softmax_cross_entropy_with_logits'):
+
+    """
+    Tensorflow implementation of focal loss from RetinaNet: FL(pt) = −(1 − p)^γ * α * log(p)
+    :param labels: One hot labels in uint8
+    :param logits: Raw logits
+    :param focus: Higher value minimizes easy examples more. 0 = normal CE
+    :param alpha: Balance factor for each class: Array, list, or tuple of length num_classes
+    :param name: Scope
+    :return: Losses reduced sum to the batch dimension [batch, 1]
+    """
+
+    with tf.name_scope(name):
+        # To prevent underflow errors
+        eps = 1e-7
+
+        # Normalize the logits to class probabilities
+        prob = tf.nn.softmax(logits, -1)
+
+        # Returns True where the labels equal 1
+        labels_eq_1 = tf.equal(labels, 1)
+
+        # Make the alpha array from the one hot label
+        alpha = tf.multiply(tf.cast(labels, tf.float32), tf.transpose(alpha))
+
+        # Reduce sum to collapse into one column
+        a_balance = tf.reduce_sum(alpha, axis=-1, keepdims=True)
+
+        # Where label is 1, return the softmax unmodified, else return 1-softmax
+        prob_true = tf.where(labels_eq_1, prob, 1 - prob)
+
+        # Calculate the modulating factor
+        modulating_factor = (1.0 - prob_true) ** focus
+
+        # Get the logits of the softmaxed values
+        log_prob = tf.log(prob + eps)
+
+        # Now calculate the loss: FL(pt) = −(1 − p)^γ * α * log(p)
+        loss = -tf.reduce_sum(a_balance * modulating_factor * tf.cast(labels, tf.float32) * log_prob, -1)
+
+        return loss

@@ -744,7 +744,7 @@ def check_inputs():
 
     # Lambda functions for retreiving our protobuf
     _parse_all = lambda dataset: sdl.load_tfrecords(dataset, [64, 64], tf.float16, 'box_data', tf.float16, [21])
-    files = sdl.retreive_filelist('tfrecords', False, path='data/train/')
+    files = sdl.retreive_filelist('tfrecords', False, path='data/test/')
     dataset = tf.data.TFRecordDataset(files, num_parallel_reads=1)
     print('******** Loading Files: ', files)
 
@@ -763,6 +763,7 @@ def check_inputs():
     # Data to track
     max_steps = int((5456930 / 1024) * 1) + 5
     views, accnos, ids, display = [], [], [], []
+    pct = 0
 
     var_init = tf.group(tf.global_variables_initializer(), tf.local_variables_initializer())
     with tf.Session() as sess:
@@ -774,26 +775,29 @@ def check_inputs():
                 # Load some metrics for testing
                 _data = sess.run(data)
 
+                # Positive count
+                pct += np.sum(_data['box_data'][:, 20])
+
                 for z in range (1024):
                     accno = _data['accno'][z].decode('utf-8')
                     view = _data['view'][z].decode('utf-8')
                     accnos.append(accno)
                     views.append(view)
                     ids.append(_data['id'][z])
-                    img = sdd.return_image_text_overlay(view.split('_')[-1], np.squeeze(_data['data'][z].astype(np.float32)))
-                    #display.append(img)
+                    # img = sdd.return_image_text_overlay(view.split('_')[-1], np.squeeze(_data['data'][z].astype(np.float32)))
+                    # display.append(img)
                     print (len(accnos), len(views))
 
             except Exception as e:
 
                 print('Step: %s-%s of %s-102 Accno %s Error %s' %(i, z, max_steps, accno, e))
                 unia, univ, unii = np.unique(np.asarray(accnos)), np.unique(np.asarray(views)), np.unique(np.asarray(ids))
-                print('Only %s accnos %s views %s ids, %s total' % (len(unia), len(univ), len(unii), len(accnos)))
+                print('Only %s accnos %s views %s ids, %s total Pos: %s' % (len(unia), len(univ), len(unii), len(accnos), pct))
                 #sdd.display_volume(display, True)
                 del e
 
         unia, univ, unii = np.unique(np.asarray(accnos)), np.unique(np.asarray(views)), np.unique(np.asarray(ids))
-        print('Only %s accnos %s views %s ids, %s total' % (len(unia), len(univ), len(unii), len(accnos)))
+        print('Only %s accnos %s views %s ids, %s total Pos: %s' % (len(unia), len(univ), len(unii), len(accnos), pct))
 
 
 class DataPreprocessor(object):
@@ -858,6 +862,6 @@ class DataPreprocessor(object):
 
     return record
 
-check_inputs()
+#check_inputs()
 # process_raw()
 #process_raw_Hedge()

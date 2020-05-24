@@ -308,13 +308,13 @@ class DataPreprocessor(object):
         image = tf.expand_dims(image, -1)
         image = tf.image.resize_images(image, [FLAGS.network_dims, FLAGS.network_dims], tf.compat.v1.image.ResizeMethod.BICUBIC)
 
-        # Image rotation parameters
-        angle = tf.random_uniform([], -0.26, 0.26)
-        image = tf.contrib.image.rotate(image, angle)
+        # # Image rotation parameters
+        # angle = tf.random_uniform([], -0.26, 0.26)
+        # image = tf.contrib.image.rotate(image, angle)
 
         # Then randomly flip
-        image = tf.image.random_flip_left_right(tf.image.random_flip_up_down(image))
-        #image = tf.image.random_flip_left_right(image)
+        #image = tf.image.random_flip_left_right(tf.image.random_flip_up_down(image))
+        image = tf.image.random_flip_left_right(image)
 
         # Random brightness/contrast
         image = tf.image.random_brightness(image, max_delta=0.05)
@@ -326,9 +326,9 @@ class DataPreprocessor(object):
         # Create a poisson noise array
         noise = tf.random.uniform(shape=[FLAGS.network_dims, FLAGS.network_dims, 1], minval=-T_noise, maxval=T_noise)
 
-        # Normalize the image
-        image = tf.image.per_image_standardization(image)
-        image = tf.add(image, noise)
+        # # Normalize the image
+        # image = tf.image.per_image_standardization(image)
+        # image = tf.add(image, noise)
 
         # Add the poisson noise
         #image = tf.add(image, tf.cast(noise, tf.float16))
@@ -338,7 +338,7 @@ class DataPreprocessor(object):
         image = tf.expand_dims(image, -1)
 
         # Normalize the image
-        #image = tf.image.per_image_standardization(image)
+        image = tf.image.per_image_standardization(image)
 
         # Resize to network size
         image = tf.image.resize_images(image, [FLAGS.network_dims, FLAGS.network_dims], tf.compat.v1.image.ResizeMethod.BICUBIC)

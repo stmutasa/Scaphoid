@@ -29,10 +29,10 @@ tf.app.flags.DEFINE_integer('repeats', 10, """epochs to repeat before reloading"
 tf.app.flags.DEFINE_string('net_type', 'RPNC', """Network predicting CEN, BBOX or RPN""")
 
 # Define some of the immutable variables
-tf.app.flags.DEFINE_integer('num_epochs', 200, """Number of epochs to run""")
-tf.app.flags.DEFINE_integer('epoch_size', 5456930, """Classifier is less data""")
-tf.app.flags.DEFINE_integer('print_interval', 2, """How often to print a summary to console during training""")
-tf.app.flags.DEFINE_float('checkpoint_interval', 4, """How many Epochs to wait before saving a checkpoint""")
+tf.app.flags.DEFINE_integer('num_epochs', 300, """Number of epochs to run""")
+tf.app.flags.DEFINE_integer('epoch_size', 143360, """Classifier is less data""")
+tf.app.flags.DEFINE_integer('print_interval', 5, """How often to print a summary to console during training""")
+tf.app.flags.DEFINE_float('checkpoint_interval', 15, """How many Epochs to wait before saving a checkpoint""")
 tf.app.flags.DEFINE_integer('batch_size', 1024, """Number of images to process in a batch.""")
 
 # Hyperparameters:
@@ -47,7 +47,7 @@ tf.app.flags.DEFINE_float('beta2', 0.999, """ The beta 1 value for the adam opti
 
 # Directory control
 tf.app.flags.DEFINE_string('train_dir', 'training/', """Directory to write event logs and save checkpoint files""")
-tf.app.flags.DEFINE_string('RunInfo', 'Class2/', """Unique file name for this training run""")
+tf.app.flags.DEFINE_string('RunInfo', 'ClassDp/', """Unique file name for this training run""")
 tf.app.flags.DEFINE_string('PTModel', 'RPN_FL6/', """The pretrained model to load""")
 tf.app.flags.DEFINE_integer('GPU', 1, """Which GPU to use""")
 
@@ -103,7 +103,7 @@ def train():
         var_restore = var_ema.variables_to_restore()
 
         # Initialize the saver
-        saver = tf.train.Saver(var_restore, max_to_keep=20)
+        saver = tf.train.Saver(var_restore, max_to_keep=30)
 
         # -------------------  Session Initializer  ----------------------
 
@@ -173,16 +173,11 @@ def train():
                         _clsLoss *= 1e3
 
                         # Positive count
-                        pct = np.sum(_lbls[:, 19])
+                        pct = np.sum(_lbls[:, 20])
 
                         # Get timing stats
                         elapsed = timer / print_interval
                         timer = 0
-
-                        # Clip labels
-                        _lblsCls = _lbls[:, 20]
-                        _lblsCen = _lbls[:, 4:6]
-                        _lblsCena = _lbls[:, 14:16]
 
                         # use numpy to print only the first sig fig
                         np.set_printoptions(precision=3, suppress=True, linewidth=150)
@@ -199,14 +194,6 @@ def train():
                               % (Epoch, _l2loss, _clsLoss, FLAGS.batch_size / elapsed, _totLoss))
 
                         print('*** Pos in Batch %s of %s,  Labels/Logits: ***' % (pct, FLAGS.batch_size))
-                        # for z in range(10):
-                        #     if FLAGS.net_type == 'RPN':
-                        #         print('%s -- Class Label: %s, Pred %s %s' % (
-                        #         _id[z], _lblsCls[z], np.argmax(_logs[0][z]), _logs[0][z]), end=' ')
-                        #         print ('Box Cen: %s, Anchor Cen: %s, Predicted norm Change: %s' %(_lblsCen[z], _lblsCena[z], _logs[1][z]))
-                        #     else:
-                        #         print('%s -- Class Label: %s, Pred %s %s' % (
-                        #         _id[z], _lblsCls[z], np.argmax(_logs[0][z]), _logs[0][z]))
 
                         # Run a session to retrieve our summaries
                         summary = mon_sess.run(all_summaries, feed_dict={phase_train: True})

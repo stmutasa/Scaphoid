@@ -165,16 +165,11 @@ def train():
                         _clsLoss *= 1e3
 
                         # Positive count
-                        pct = np.sum(_lbls[:, 19])
+                        pct = np.sum(_lbls[:, 20])
 
                         # Get timing stats
                         elapsed = timer / print_interval
                         timer = 0
-
-                        # Clip labels
-                        _lblsCls = _lbls[:, 20]
-                        _lblsCen = _lbls[:, 4:6]
-                        _lblsCena = _lbls[:, 14:16]
 
                         # use numpy to print only the first sig fig
                         np.set_printoptions(precision=3, suppress=True, linewidth=150)
