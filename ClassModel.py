@@ -66,7 +66,7 @@ def forward_pass_RPN(images, phase_train):
     return LogitsC
 
 
-def total_loss(logits, labels, type='FL'):
+def total_loss(logits, labels, type='WCE'):
 
     """
     Classification loss, which is weighted cross entropy
@@ -99,7 +99,7 @@ def total_loss(logits, labels, type='FL'):
     else:
 
         # Use focal loss
-        class_loss = tf.reduce_sum(focal_softmax_cross_entropy_with_logits(labelsC, logits, alpha=[0.25, 0.75]))
+        class_loss = tf.reduce_sum(focal_softmax_cross_entropy_with_logits(labelsC, logits, alpha=[1.0, 5.0]))
         # Normalize by minibatch size
         class_loss = tf.divide(class_loss, FLAGS.batch_size)
 
@@ -126,7 +126,7 @@ def backward_pass(total_loss):
 
     # Decay the learning rate
     #dk_steps = int((FLAGS.epoch_size / FLAGS.batch_size) * (FLAGS.num_epochs/4))
-    dk_steps = int((FLAGS.epoch_size / FLAGS.batch_size) * 15)
+    dk_steps = int((FLAGS.epoch_size / FLAGS.batch_size) * 30)
     lr_decayed = tf.train.cosine_decay_restarts(FLAGS.learning_rate, global_step, dk_steps)
 
     # Compute the gradients. NAdam optimizer came in tensorflow 1.2

@@ -25,8 +25,8 @@ tf.app.flags.DEFINE_string('data_dir', 'data/test/', """Path to the data directo
 tf.app.flags.DEFINE_string('training_dir', 'training/', """Path to the training directory.""")
 tf.app.flags.DEFINE_integer('box_dims', 64, """dimensions to save files""")
 tf.app.flags.DEFINE_integer('network_dims', 64, """dimensions of the network input""")
-tf.app.flags.DEFINE_integer('epoch_size', 3072, """How many examples""")
-tf.app.flags.DEFINE_integer('batch_size', 3072, """Number of images to process in a batch.""")
+tf.app.flags.DEFINE_integer('epoch_size', 14596, """How many examples""")
+tf.app.flags.DEFINE_integer('batch_size', 3649, """Number of images to process in a batch.""")
 
 # Hyperparameters:
 tf.app.flags.DEFINE_float('dropout_factor', 0.75, """ Keep probability""")
@@ -130,7 +130,7 @@ def test():
                 finally:
 
                     # Combine metrics
-                    print (len(np.unique(_accnos)))
+                    # print (len(np.unique(_accnos)))
                     _data, _labels, _softmax = combine_predictions(_lbls, _smx, _accnos, _obj, FLAGS.batch_size, sdt)
 
                     # Retreive the scores
