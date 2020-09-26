@@ -1,5 +1,5 @@
 """
-To train the Localization model
+To train the classification model from random initialization
 """
 
 import os

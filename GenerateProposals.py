@@ -115,6 +115,8 @@ def execute():
         # Merge dictionaries
         data.update(result_dict)
 
+        #TODO: Add code here to generate 5-10 dummy boxes that contain no scaphoid
+
         # Update count
         counter[cls] += len(result_dict)
 

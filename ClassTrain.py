@@ -1,5 +1,5 @@
 """
-To train the Localization model
+To train the Classification model using pretrained data
 """
 
 import os
